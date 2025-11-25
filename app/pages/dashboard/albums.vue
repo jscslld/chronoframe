@@ -256,7 +256,8 @@ const filteredPhotos = computed(() => {
   return allPhotos.value.filter(
     (photo) =>
       (photo.title?.toLowerCase() || '').includes(query) ||
-      (photo.description?.toLowerCase() || '').includes(query),
+      (photo.description?.toLowerCase() || '').includes(query) ||
+      (photo.tags || []).includes(query),
   )
 })
 

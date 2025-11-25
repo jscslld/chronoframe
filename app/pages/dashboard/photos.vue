@@ -200,9 +200,9 @@ const descriptionChanged = computed(
 )
 
 const locationChanged = computed(() => {
-  if (!locationTouched.value) {
-    return false
-  }
+  // if (!locationTouched.value) {
+  //   return false
+  // }
   const current = locationSelection.value
   const original = originalMetadata.value.location
   if (!current && !original) {
@@ -239,6 +239,35 @@ const formattedCoordinates = computed(() => {
     longitude: locationSelection.value.longitude.toFixed(6),
   }
 })
+
+function onCoordinateInput(val) {
+  // 如果是事件对象，取 value
+  if (val && val.target && typeof val.target.value === 'string') {
+    val = val.target.value
+  }
+
+  // 如果组件通过 @change 直接传了新 model 值（对象），处理它
+  if (val && typeof val === 'object') {
+    if ('lat' in val && 'lng' in val) {
+      locationSelection.value = { lat: Number(val.lat), lng: Number(val.lng) }
+    }
+    return
+  }
+
+  // 现在确保是字符串
+  if (!val || typeof val !== 'string') return
+
+  const parts = val.split(',').map(s => s.trim())
+  if (parts.length !== 2) return
+
+  const lat = parseFloat(parts[0])
+  const lng = parseFloat(parts[1])
+  if (isNaN(lat) || isNaN(lng)) return
+
+  console.log(locationSelection)
+  // 更新 MapLocationPicker 的 v-model
+  locationSelection.value = { latitude:lat, longitude:lng }
+}
 
 const uploadImage = async (file: File, existingFileId?: string) => {
   const fileName = file.name
@@ -2367,7 +2396,7 @@ onUnmounted(() => {
                     </template>
                   </MapLocationPicker>
 
-                  <div
+                  <!-- <div
                     class="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-2"
                   >
                     <span
@@ -2382,7 +2411,21 @@ onUnmounted(() => {
                     <span v-else>
                       {{ $t('dashboard.photos.editModal.fields.noLocation') }}
                     </span>
+                  </div> -->
+                  
+                  <div class="space-y-1">
+                    <label class="text-xs text-neutral-500 dark:text-neutral-400">
+                      {{ $t('dashboard.photos.editModal.fields.coordinates') }}
+                    </label>
+
+                    <UInput
+                      :value="formattedCoordinates ? `${formattedCoordinates.latitude}, ${formattedCoordinates.longitude}` : ''"
+                      placeholder="35.6812, 139.7671"
+                      class="w-full text-xs"
+                      @change="onCoordinateInput"
+                    />
                   </div>
+
                 </div>
 
                 <div
