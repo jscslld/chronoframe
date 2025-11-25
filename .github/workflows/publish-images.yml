@@ -136,23 +136,3 @@ jobs:
           if [ "${IS_PRERELEASE}" != "true" ]; then
             create_and_push_manifest "latest"
           fi
-
-  release:
-    needs: 
-      - prepare
-      - manifest
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
-      IS_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-    steps:
-      - name: Create Release (draft)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: Release v${{ env.VERSION }}
-          body: "Automated release for version ${{ env.VERSION }}"
-          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
-          draft: true
