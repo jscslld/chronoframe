@@ -106,6 +106,7 @@ const description = computed(() => (props.description || '').slice(0, 200))
       >
         <div
           class="rounded-3xl border-4 border-neutral-300/30 bg-neutral-300/20 backdrop-blur-2xl px-6 py-4 flex items-center gap-3"
+          v-if="photo.exif?.FocalLengthIn35mmFormat"
         >
           <Icon
             name="streamline:image-accessories-lenses-photos-camera-shutter-picture-photography-pictures-photo-lens"
@@ -118,6 +119,7 @@ const description = computed(() => (props.description || '').slice(0, 200))
         </div>
         <div
           class="rounded-3xl border-4 border-neutral-300/30 bg-neutral-300/20 backdrop-blur-2xl px-6 py-4 flex items-center gap-3"
+          v-if="photo.exif?.FNumber"
         >
           <Icon
             name="tabler:aperture"
@@ -128,6 +130,7 @@ const description = computed(() => (props.description || '').slice(0, 200))
         </div>
         <div
           class="rounded-3xl border-4 border-neutral-300/30 bg-neutral-300/20 backdrop-blur-2xl px-6 py-4 flex items-center gap-3"
+          v-if="photo.exif?.ExposureTime"
         >
           <Icon
             name="material-symbols:shutter-speed"
@@ -138,6 +141,7 @@ const description = computed(() => (props.description || '').slice(0, 200))
         </div>
         <div
           class="rounded-3xl border-4 border-neutral-300/30 bg-neutral-300/20 backdrop-blur-2xl px-6 py-4 flex items-center gap-3"
+          v-if="photo.exif?.ISO"
         >
           <Icon
             name="carbon:iso-outline"
