@@ -21,36 +21,50 @@ useHead({
     `${title ? title + ' | ' : ''}${appTitle.value || 'ChronoFrame'}`,
 })
 
-const { data, refresh, status } = useFetch('/api/photos')
-const photos = computed(() => (data.value as Photo[]) || [])
+// 获取 query 中的 albumId
+const albumId = computed(() => router.currentRoute.value.query.albumId as string | undefined)
 
+// 构建 fetch URL
+const fetchUrl = computed(() => {
+  return albumId.value ? `/api/photos?albumId=${albumId.value}` : '/api/photos'
+})
+
+const { data, refresh, status } = useFetch<Photo[]>(fetchUrl)
+
+const photos = computed(() => data.value || [])
 const { switchToIndex, closeViewer, clearReturnRoute } = useViewerState()
 const { currentPhotoIndex, isViewerOpen, returnRoute, isDirectAccess } =
   storeToRefs(useViewerState())
 
 const handleIndexChange = (newIndex: number) => {
+  const photo = photos.value[newIndex]
+  if (!photo) return
+
   switchToIndex(newIndex)
-  router.replace(`/${photos.value[newIndex]?.id}`)
+
+  router.replace({
+    path: `/${photo.id}`,
+    query: { ...router.currentRoute.value.query }, // 保留原 query
+  })
 }
 
 const handleClose = () => {
   closeViewer()
 
-  // 如果是直接访问详情页面，关闭时返回首页
+  const currentQuery = router.currentRoute.value.query
+
   if (isDirectAccess.value) {
     isDirectAccess.value = false
-    router.replace('/')
+    router.replace({ path: '/', query: { ...currentQuery } })
   } else if (returnRoute.value) {
-    // 如果有指定的返回路由，返回到该路由
     const destination = returnRoute.value
     clearReturnRoute()
-    router.replace(destination)
+    router.replace({ path: destination, query: { ...currentQuery } })
   } else {
-    // 否则使用历史记录或默认返回首页
     if (window.history.length > 1) {
       router.back()
     } else {
-      router.replace('/')
+      router.replace({ path: '/', query: { ...currentQuery } })
     }
   }
 }

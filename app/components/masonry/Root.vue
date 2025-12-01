@@ -326,7 +326,16 @@ onUnmounted(() => {
 })
 
 const handleOpenViewer = (index: number) => {
-  router.push(`/${displayPhotos.value[index]?.id}`)
+  const photo = displayPhotos.value[index]
+  if (!photo) return
+
+  // 保留当前 query
+  const currentQuery = router.currentRoute.value.query
+
+  router.push({
+    path: `/${photo.id}`,
+    query: { ...currentQuery }  // 保留原有 query
+  })
 }
 
 const scrollToPhoto = (photoIndex: number) => {

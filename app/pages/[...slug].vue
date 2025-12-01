@@ -43,7 +43,11 @@ watch(
       clearAllFilters()
       toggleFilter('tags', tagParam)
 
-      router.replace('/')
+      const { tag, ...otherQuery } = route.query
+      router.replace({
+        path: '/',
+        query: { ...otherQuery },
+      })
     }
   },
   { immediate: true },
@@ -51,7 +55,7 @@ watch(
 
 watch(
   [photoId, photos],
-  ([currentPhotoId, currentPhotos]) => {
+  async ([currentPhotoId, currentPhotos]) => {
     if (currentPhotoId && currentPhotos.length > 0) {
       const foundIndex = currentPhotos.findIndex(
         (photo) => photo.id === currentPhotoId,
@@ -60,6 +64,9 @@ watch(
         useHead({
           title: currentPhotos[foundIndex]?.title || $t('title.fallback.photo'),
         })
+
+        await nextTick()
+
         if (!isViewerOpen.value) {
           // 直接访问照片详情页时，不设置 returnRoute（传入 null）
           openViewer(foundIndex, null)
