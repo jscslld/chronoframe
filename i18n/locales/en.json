@@ -526,6 +526,7 @@
           "noRating": "No rating",
           "noGps": "No GPS info",
           "unknown": "Unknown",
+          "untitled": "Untitled",
           "staticPhoto": "Static Photo",
           "noReactions": "No reactions"
         },
@@ -545,7 +546,13 @@
         "selected": "{count} / {total} rows selected",
         "batchReprocess": "Reprocess",
         "batchDownload": "Download",
+        "batchEditTags": "Edit Tags",
+        "batchEditDateTaken": "Edit Date Taken",
+        "batchEditLocation": "Edit GPS",
         "batchDelete": "Batch Delete"
+      },
+      "pagination": {
+        "summary": "Showing {start}-{end} of {total}"
       },
       "slideover": {
         "title": "Upload Photos",
@@ -585,6 +592,41 @@
         },
         "notSupported": "Your browser does not support video playback"
       },
+      "batchEditTagsModal": {
+        "title": "Batch Edit Tags",
+        "description": "Set tags for {count} selected photo(s).",
+        "fields": {
+          "tags": "Tags"
+        },
+        "actions": {
+          "cancel": "Cancel",
+          "save": "Save"
+        }
+      },
+      "batchEditDateModal": {
+        "title": "Batch Edit Date Taken",
+        "description": "Set date taken for {count} selected photo(s).",
+        "fields": {
+          "dateTaken": "Date Taken"
+        },
+        "actions": {
+          "cancel": "Cancel",
+          "save": "Save"
+        }
+      },
+      "batchEditLocationModal": {
+        "title": "Batch Edit GPS Coordinates",
+        "description": "Set GPS coordinates for {count} selected photo(s).",
+        "fields": {
+          "latitude": "Latitude",
+          "longitude": "Longitude"
+        },
+        "hint": "Latitude range: -90 to 90, longitude range: -180 to 180.",
+        "actions": {
+          "cancel": "Cancel",
+          "save": "Save"
+        }
+      },
       "messages": {
         "uploadSuccess": "Photo uploaded successfully, processing...",
         "uploadMultipleSuccess": "{count} photos uploaded successfully, processing...",
@@ -602,6 +644,15 @@
         "batchDownloadSuccess": "Batch download completed successfully",
         "batchDownloadFailed": "Batch download failed",
         "batchDownloadPartial": "Batch download completed with some failures",
+        "batchTagsUpdateSuccess": "Updated tags for {count} photo(s)",
+        "batchTagsUpdateFailed": "Failed to batch update tags",
+        "batchDateUpdateSuccess": "Updated date taken for {count} photo(s)",
+        "batchDateUpdateFailed": "Failed to batch update date taken",
+        "batchLocationUpdateSuccess": "Updated location for {count} photo(s)",
+        "batchLocationUpdateFailed": "Failed to batch update location",
+        "batchPartialFailed": "{count} photo(s) failed to update",
+        "invalidDateTaken": "Please provide a valid date and time",
+        "invalidGpsCoordinates": "Please provide valid GPS coordinates",
         "downloadedCount": "Downloaded {count} photo(s)",
         "downloadFailedCount": "Failed to download {count} photo(s)",
         "downloadPartialCount": "Downloaded {success} photo(s), {failed} failed",

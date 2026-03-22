@@ -520,9 +520,7 @@ const selectedRowsCount = computed((): number => {
   return table.value?.tableApi?.getFilteredSelectedRowModel().rows.length || 0
 })
 
-const totalRowsCount = computed((): number => {
-  return table.value?.tableApi?.getFilteredRowModel().rows.length || 0
-})
+const totalRowsCount = computed((): number => filteredData.value.length)
 
 const livePhotoStats = computed(() => {
   if (!filteredPhotos.value) return { total: 0, livePhotos: 0, staticPhotos: 0 }
@@ -537,6 +535,8 @@ const livePhotoStats = computed(() => {
 })
 
 const photoFilter = ref<'all' | 'livephoto' | 'static'>('all')
+const pageSize = ref(50)
+const currentPage = ref(1)
 
 const filteredData = computed(() => {
   if (!filteredPhotos.value) return []
@@ -551,9 +551,55 @@ const filteredData = computed(() => {
   }
 })
 
-// 监听过滤后的照片变化，自动获取表态数据
+const totalPages = computed(() => {
+  const total = filteredData.value.length
+  return Math.max(1, Math.ceil(total / pageSize.value))
+})
+
+const paginatedData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredData.value.slice(start, start + pageSize.value)
+})
+
+const paginationStart = computed(() => {
+  if (filteredData.value.length === 0) return 0
+  return (currentPage.value - 1) * pageSize.value + 1
+})
+
+const paginationEnd = computed(() => {
+  if (filteredData.value.length === 0) return 0
+  return Math.min(currentPage.value * pageSize.value, filteredData.value.length)
+})
+
+const canGoPrevPage = computed(() => currentPage.value > 1)
+const canGoNextPage = computed(() => currentPage.value < totalPages.value)
+
+const goPrevPage = () => {
+  if (!canGoPrevPage.value) return
+  currentPage.value -= 1
+}
+
+const goNextPage = () => {
+  if (!canGoNextPage.value) return
+  currentPage.value += 1
+}
+
+watch([() => filteredData.value.length, pageSize], () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value
+  }
+  if (currentPage.value < 1) {
+    currentPage.value = 1
+  }
+})
+
+watch(currentPage, () => {
+  rowSelection.value = {}
+})
+
+// 监听当前页照片变化，自动获取表态数据
 watch(
-  () => filteredData.value,
+  () => paginatedData.value,
   async (photos) => {
     if (photos && photos.length > 0) {
       const photoIds = photos.map((p: Photo) => p.id)
@@ -785,6 +831,45 @@ const columns: TableColumn<Photo>[] = [
   {
     accessorKey: 'title',
     header: $t('dashboard.photos.table.columns.title'),
+    cell: ({ row }) => {
+      const photo = row.original
+      const title = photo.title || ''
+
+      if (inlineEditingTitlePhotoId.value === photo.id) {
+        return h('input', {
+          value: inlineTitleDraft.value,
+          class:
+            'w-full rounded-md border border-primary-300 bg-white px-2 py-1 text-xs text-neutral-800 outline-none ring-1 ring-primary-200 dark:border-primary-700 dark:bg-neutral-900 dark:text-neutral-100',
+          autofocus: true,
+          onInput: (event: Event) => {
+            inlineTitleDraft.value = (event.target as HTMLInputElement).value
+          },
+          onBlur: () => {
+            void commitInlineTitleEdit(photo)
+          },
+          onKeydown: (event: KeyboardEvent) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              void commitInlineTitleEdit(photo)
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              cancelInlineTitleEdit()
+            }
+          },
+        })
+      }
+
+      return h(
+        'button',
+        {
+          class:
+            'max-w-[240px] truncate text-left text-xs text-primary-600 hover:text-primary-500 hover:underline dark:text-primary-300 dark:hover:text-primary-200',
+          title: title || $t('dashboard.photos.table.cells.untitled'),
+          onClick: () => startInlineTitleEdit(photo),
+        },
+        title || $t('dashboard.photos.table.cells.untitled'),
+      )
+    },
   },
   {
     accessorKey: 'tags',
@@ -1464,6 +1549,77 @@ const isDeleteConfirmOpen = ref(false)
 const deleteMode = ref<'single' | 'batch'>('single')
 const deleteTargetPhotos = ref<Photo[]>([])
 const isDeleting = ref(false)
+const isBatchDateModalOpen = ref(false)
+const isBatchLocationModalOpen = ref(false)
+const isBatchUpdatingDate = ref(false)
+const isBatchUpdatingLocation = ref(false)
+const isBatchTagsModalOpen = ref(false)
+const isBatchUpdatingTags = ref(false)
+const batchDateTakenInput = ref('')
+const batchTagsInput = ref<string[]>([])
+const batchLocationInput = reactive({
+  latitude: '',
+  longitude: '',
+})
+const inlineEditingTitlePhotoId = ref<string | null>(null)
+const inlineTitleDraft = ref('')
+const isInlineTitleSaving = ref(false)
+
+const getSelectedPhotos = (): Photo[] => {
+  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
+  return selectedRowModel?.rows.map((row: any) => row.original) || []
+}
+
+const startInlineTitleEdit = (photo: Photo) => {
+  if (isInlineTitleSaving.value) {
+    return
+  }
+
+  inlineEditingTitlePhotoId.value = photo.id
+  inlineTitleDraft.value = photo.title || ''
+}
+
+const cancelInlineTitleEdit = () => {
+  inlineEditingTitlePhotoId.value = null
+  inlineTitleDraft.value = ''
+}
+
+const commitInlineTitleEdit = async (photo: Photo) => {
+  if (inlineEditingTitlePhotoId.value !== photo.id || isInlineTitleSaving.value) {
+    return
+  }
+
+  const nextTitle = inlineTitleDraft.value.trim()
+  const currentTitle = (photo.title || '').trim()
+
+  if (nextTitle === currentTitle) {
+    cancelInlineTitleEdit()
+    return
+  }
+
+  isInlineTitleSaving.value = true
+  try {
+    await $fetch('/api/photos/' + photo.id, {
+      method: 'PUT',
+      body: {
+        title: nextTitle,
+      },
+    })
+
+    await refresh()
+  } catch (error: any) {
+    toast.add({
+      title: $t('dashboard.photos.messages.metadataUpdateFailed'),
+      description: error?.message || $t('dashboard.photos.messages.error'),
+      color: 'error',
+    })
+  } finally {
+    isInlineTitleSaving.value = false
+    if (inlineEditingTitlePhotoId.value === photo.id) {
+      cancelInlineTitleEdit()
+    }
+  }
+}
 
 const openDeleteConfirm = (mode: 'single' | 'batch', photos: Photo[]) => {
   deleteMode.value = mode
@@ -1475,11 +1631,279 @@ const handleSingleDeleteRequest = (photo: Photo) => {
   openDeleteConfirm('single', [photo])
 }
 
+const openBatchDateModal = () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    return
+  }
+
+  const firstDate = selectedPhotos[0]?.dateTaken
+  batchDateTakenInput.value = firstDate
+    ? dayjs(firstDate).format('YYYY-MM-DDTHH:mm')
+    : dayjs().format('YYYY-MM-DDTHH:mm')
+
+  isBatchDateModalOpen.value = true
+}
+
+const submitBatchDateUpdate = async () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    isBatchDateModalOpen.value = false
+    return
+  }
+
+  if (!batchDateTakenInput.value) {
+    toast.add({
+      title: $t('dashboard.photos.messages.invalidDateTaken'),
+      description: '',
+      color: 'error',
+    })
+    return
+  }
+
+  const parsedDate = new Date(batchDateTakenInput.value)
+  if (Number.isNaN(parsedDate.getTime())) {
+    toast.add({
+      title: $t('dashboard.photos.messages.invalidDateTaken'),
+      description: '',
+      color: 'error',
+    })
+    return
+  }
+
+  isBatchUpdatingDate.value = true
+  try {
+    const result = await $fetch<{
+      updatedCount: number
+      failedCount: number
+    }>('/api/photos/batch/date-taken', {
+      method: 'PUT',
+      body: {
+        photoIds: selectedPhotos.map((photo) => photo.id),
+        dateTaken: parsedDate.toISOString(),
+      },
+    })
+
+    toast.add({
+      title: $t('dashboard.photos.messages.batchDateUpdateSuccess', {
+        count: result.updatedCount,
+      }),
+      description: '',
+      color: 'success',
+    })
+
+    if (result.failedCount > 0) {
+      toast.add({
+        title: $t('dashboard.photos.messages.batchPartialFailed', {
+          count: result.failedCount,
+        }),
+        description: '',
+        color: 'warning',
+      })
+    }
+
+    rowSelection.value = {}
+    isBatchDateModalOpen.value = false
+    await refresh()
+  } catch (error: any) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchDateUpdateFailed'),
+      description: error?.message || $t('dashboard.photos.messages.error'),
+      color: 'error',
+    })
+  } finally {
+    isBatchUpdatingDate.value = false
+  }
+}
+
+const openBatchLocationModal = () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    return
+  }
+
+  const firstPhoto = selectedPhotos[0]
+  batchLocationInput.latitude =
+    typeof firstPhoto?.latitude === 'number'
+      ? firstPhoto.latitude.toFixed(6)
+      : ''
+  batchLocationInput.longitude =
+    typeof firstPhoto?.longitude === 'number'
+      ? firstPhoto.longitude.toFixed(6)
+      : ''
+
+  isBatchLocationModalOpen.value = true
+}
+
+const submitBatchLocationUpdate = async () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    isBatchLocationModalOpen.value = false
+    return
+  }
+
+  const latitude = Number(batchLocationInput.latitude)
+  const longitude = Number(batchLocationInput.longitude)
+
+  if (
+    Number.isNaN(latitude) ||
+    Number.isNaN(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    toast.add({
+      title: $t('dashboard.photos.messages.invalidGpsCoordinates'),
+      description: '',
+      color: 'error',
+    })
+    return
+  }
+
+  isBatchUpdatingLocation.value = true
+  try {
+    const result = await $fetch<{
+      updatedCount: number
+      failedCount: number
+    }>('/api/photos/batch/location', {
+      method: 'PUT',
+      body: {
+        photoIds: selectedPhotos.map((photo) => photo.id),
+        location: {
+          latitude,
+          longitude,
+        },
+      },
+    })
+
+    toast.add({
+      title: $t('dashboard.photos.messages.batchLocationUpdateSuccess', {
+        count: result.updatedCount,
+      }),
+      description: '',
+      color: 'success',
+    })
+
+    if (result.failedCount > 0) {
+      toast.add({
+        title: $t('dashboard.photos.messages.batchPartialFailed', {
+          count: result.failedCount,
+        }),
+        description: '',
+        color: 'warning',
+      })
+    }
+
+    rowSelection.value = {}
+    isBatchLocationModalOpen.value = false
+    await refresh()
+  } catch (error: any) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchLocationUpdateFailed'),
+      description: error?.message || $t('dashboard.photos.messages.error'),
+      color: 'error',
+    })
+  } finally {
+    isBatchUpdatingLocation.value = false
+  }
+}
+
+const openBatchTagsModal = () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    return
+  }
+
+  batchTagsInput.value = normalizeTagList(selectedPhotos[0]?.tags || [])
+  isBatchTagsModalOpen.value = true
+}
+
+const submitBatchTagsUpdate = async () => {
+  const selectedPhotos = getSelectedPhotos()
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    isBatchTagsModalOpen.value = false
+    return
+  }
+
+  isBatchUpdatingTags.value = true
+  try {
+    const result = await $fetch<{
+      updatedCount: number
+      failedCount: number
+    }>('/api/photos/batch/tags', {
+      method: 'PUT',
+      body: {
+        photoIds: selectedPhotos.map((photo) => photo.id),
+        tags: normalizeTagList(batchTagsInput.value),
+      },
+    })
+
+    toast.add({
+      title: $t('dashboard.photos.messages.batchTagsUpdateSuccess', {
+        count: result.updatedCount,
+      }),
+      description: '',
+      color: 'success',
+    })
+
+    if (result.failedCount > 0) {
+      toast.add({
+        title: $t('dashboard.photos.messages.batchPartialFailed', {
+          count: result.failedCount,
+        }),
+        description: '',
+        color: 'warning',
+      })
+    }
+
+    rowSelection.value = {}
+    isBatchTagsModalOpen.value = false
+    await refresh()
+  } catch (error: any) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchTagsUpdateFailed'),
+      description: error?.message || $t('dashboard.photos.messages.error'),
+      color: 'error',
+    })
+  } finally {
+    isBatchUpdatingTags.value = false
+  }
+}
+
 // 批量删除功能
 const handleBatchDelete = () => {
-  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
-  const selectedPhotos =
-    selectedRowModel?.rows.map((row: any) => row.original) || []
+  const selectedPhotos = getSelectedPhotos()
 
   if (selectedPhotos.length === 0) {
     toast.add({
@@ -1574,9 +1998,7 @@ const confirmDelete = async () => {
 
 // 批量重新处理照片功能
 const handleBatchReprocess = async () => {
-  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
-  const selectedPhotos =
-    selectedRowModel?.rows.map((row: any) => row.original) || []
+  const selectedPhotos = getSelectedPhotos()
 
   if (selectedPhotos.length === 0) {
     toast.add({
@@ -1653,9 +2075,7 @@ const handleBatchReprocess = async () => {
 
 // 批量下载照片
 const handleBatchDownload = async () => {
-  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
-  const selectedPhotos =
-    selectedRowModel?.rows.map((row: any) => row.original) || []
+  const selectedPhotos = getSelectedPhotos()
 
   if (selectedPhotos.length === 0) {
     toast.add({
@@ -2110,8 +2530,8 @@ onUnmounted(() => {
               @click="
                 async () => {
                   await refresh()
-                  if (filteredData.length > 0) {
-                    await fetchReactions(filteredData.map((p: Photo) => p.id))
+                  if (paginatedData.length > 0) {
+                    await fetchReactions(paginatedData.map((p: Photo) => p.id))
                   }
                 }
               "
@@ -2177,7 +2597,7 @@ onUnmounted(() => {
             :column-pinning="{
               right: ['actions'],
             }"
-            :data="filteredData as Photo[]"
+            :data="paginatedData as Photo[]"
             :columns="columns"
             :loading="status === 'pending'"
             sticky
@@ -2208,7 +2628,7 @@ onUnmounted(() => {
 
           <!-- 选择状态信息和批量操作 -->
           <div
-            class="px-4 py-4 border-t border-neutral-200 dark:border-neutral-700"
+            class="px-4 py-4 border-t border-neutral-200 dark:border-neutral-700 space-y-3"
           >
             <div
               class="text-sm text-neutral-600 dark:text-neutral-400 flex items-center gap-2"
@@ -2252,6 +2672,45 @@ onUnmounted(() => {
                 </UButton>
 
                 <UButton
+                  variant="soft"
+                  color="neutral"
+                  size="xs"
+                  icon="tabler:tags"
+                  class="flex-1 sm:flex-none"
+                  @click="openBatchTagsModal"
+                >
+                  <span>{{
+                    $t('dashboard.photos.selection.batchEditTags')
+                  }}</span>
+                </UButton>
+
+                <UButton
+                  variant="soft"
+                  color="secondary"
+                  size="xs"
+                  icon="tabler:calendar-time"
+                  class="flex-1 sm:flex-none"
+                  @click="openBatchDateModal"
+                >
+                  <span>{{
+                    $t('dashboard.photos.selection.batchEditDateTaken')
+                  }}</span>
+                </UButton>
+
+                <UButton
+                  variant="soft"
+                  color="warning"
+                  size="xs"
+                  icon="tabler:map-pin"
+                  class="flex-1 sm:flex-none"
+                  @click="openBatchLocationModal"
+                >
+                  <span>{{
+                    $t('dashboard.photos.selection.batchEditLocation')
+                  }}</span>
+                </UButton>
+
+                <UButton
                   color="error"
                   variant="soft"
                   size="xs"
@@ -2263,6 +2722,49 @@ onUnmounted(() => {
                     $t('dashboard.photos.selection.batchDelete')
                   }}</span>
                 </UButton>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="text-xs text-neutral-500 dark:text-neutral-400">
+                {{
+                  $t('dashboard.photos.pagination.summary', {
+                    start: paginationStart,
+                    end: paginationEnd,
+                    total: totalRowsCount,
+                  })
+                }}
+              </div>
+
+              <div class="flex items-center gap-2">
+                <USelectMenu
+                  v-model="pageSize"
+                  :items="[20, 50, 100, 200]"
+                  size="xs"
+                  class="w-24"
+                />
+
+                <UButton
+                  variant="soft"
+                  color="neutral"
+                  size="xs"
+                  icon="tabler:chevron-left"
+                  :disabled="!canGoPrevPage"
+                  @click="goPrevPage"
+                />
+
+                <span class="text-xs text-neutral-500 dark:text-neutral-400 min-w-[72px] text-center">
+                  {{ currentPage }} / {{ totalPages }}
+                </span>
+
+                <UButton
+                  variant="soft"
+                  color="neutral"
+                  size="xs"
+                  icon="tabler:chevron-right"
+                  :disabled="!canGoNextPage"
+                  @click="goNextPage"
+                />
               </div>
             </div>
           </div>
@@ -2448,6 +2950,170 @@ onUnmounted(() => {
                   </UButton>
                 </div>
               </UForm>
+            </div>
+          </template>
+        </UModal>
+
+        <UModal v-model:open="isBatchTagsModalOpen">
+          <template #content>
+            <div class="p-6 space-y-4">
+              <div class="space-y-1">
+                <h3 class="text-lg font-semibold">
+                  {{ $t('dashboard.photos.batchEditTagsModal.title') }}
+                </h3>
+                <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                  {{
+                    $t('dashboard.photos.batchEditTagsModal.description', {
+                      count: selectedRowsCount,
+                    })
+                  }}
+                </p>
+              </div>
+
+              <UFormField
+                :label="$t('dashboard.photos.batchEditTagsModal.fields.tags')"
+                name="batchTags"
+              >
+                <UInputTags
+                  v-model="batchTagsInput"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <div class="flex justify-end gap-2 pt-2">
+                <UButton
+                  variant="ghost"
+                  color="neutral"
+                  :disabled="isBatchUpdatingTags"
+                  @click="isBatchTagsModalOpen = false"
+                >
+                  {{ $t('dashboard.photos.batchEditTagsModal.actions.cancel') }}
+                </UButton>
+                <UButton
+                  icon="tabler:device-floppy"
+                  :loading="isBatchUpdatingTags"
+                  @click="submitBatchTagsUpdate"
+                >
+                  {{ $t('dashboard.photos.batchEditTagsModal.actions.save') }}
+                </UButton>
+              </div>
+            </div>
+          </template>
+        </UModal>
+
+        <UModal v-model:open="isBatchDateModalOpen">
+          <template #content>
+            <div class="p-6 space-y-4">
+              <div class="space-y-1">
+                <h3 class="text-lg font-semibold">
+                  {{ $t('dashboard.photos.batchEditDateModal.title') }}
+                </h3>
+                <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                  {{
+                    $t('dashboard.photos.batchEditDateModal.description', {
+                      count: selectedRowsCount,
+                    })
+                  }}
+                </p>
+              </div>
+
+              <UFormField
+                :label="$t('dashboard.photos.batchEditDateModal.fields.dateTaken')"
+                name="batchDateTaken"
+              >
+                <UInput
+                  v-model="batchDateTakenInput"
+                  type="datetime-local"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <div class="flex justify-end gap-2 pt-2">
+                <UButton
+                  variant="ghost"
+                  color="neutral"
+                  :disabled="isBatchUpdatingDate"
+                  @click="isBatchDateModalOpen = false"
+                >
+                  {{ $t('dashboard.photos.batchEditDateModal.actions.cancel') }}
+                </UButton>
+                <UButton
+                  icon="tabler:device-floppy"
+                  :loading="isBatchUpdatingDate"
+                  @click="submitBatchDateUpdate"
+                >
+                  {{ $t('dashboard.photos.batchEditDateModal.actions.save') }}
+                </UButton>
+              </div>
+            </div>
+          </template>
+        </UModal>
+
+        <UModal v-model:open="isBatchLocationModalOpen">
+          <template #content>
+            <div class="p-6 space-y-4">
+              <div class="space-y-1">
+                <h3 class="text-lg font-semibold">
+                  {{ $t('dashboard.photos.batchEditLocationModal.title') }}
+                </h3>
+                <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                  {{
+                    $t('dashboard.photos.batchEditLocationModal.description', {
+                      count: selectedRowsCount,
+                    })
+                  }}
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <UFormField
+                  :label="$t('dashboard.photos.batchEditLocationModal.fields.latitude')"
+                  name="batchLatitude"
+                >
+                  <UInput
+                    v-model="batchLocationInput.latitude"
+                    type="number"
+                    step="0.000001"
+                    placeholder="-90 ~ 90"
+                    class="w-full"
+                  />
+                </UFormField>
+
+                <UFormField
+                  :label="$t('dashboard.photos.batchEditLocationModal.fields.longitude')"
+                  name="batchLongitude"
+                >
+                  <UInput
+                    v-model="batchLocationInput.longitude"
+                    type="number"
+                    step="0.000001"
+                    placeholder="-180 ~ 180"
+                    class="w-full"
+                  />
+                </UFormField>
+              </div>
+
+              <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                {{ $t('dashboard.photos.batchEditLocationModal.hint') }}
+              </p>
+
+              <div class="flex justify-end gap-2 pt-2">
+                <UButton
+                  variant="ghost"
+                  color="neutral"
+                  :disabled="isBatchUpdatingLocation"
+                  @click="isBatchLocationModalOpen = false"
+                >
+                  {{ $t('dashboard.photos.batchEditLocationModal.actions.cancel') }}
+                </UButton>
+                <UButton
+                  icon="tabler:device-floppy"
+                  :loading="isBatchUpdatingLocation"
+                  @click="submitBatchLocationUpdate"
+                >
+                  {{ $t('dashboard.photos.batchEditLocationModal.actions.save') }}
+                </UButton>
+              </div>
             </div>
           </template>
         </UModal>

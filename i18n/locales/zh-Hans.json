@@ -528,6 +528,7 @@
           "noRating": "未评分",
           "noGps": "无 GPS 信息",
           "unknown": "未知",
+          "untitled": "未命名",
           "staticPhoto": "一般照片",
           "noReactions": "无表态"
         },
@@ -547,7 +548,13 @@
         "selected": "{count} / {total} 行已选择",
         "batchReprocess": "重新处理",
         "batchDownload": "批量下载",
+        "batchEditTags": "批量改标签",
+        "batchEditDateTaken": "批量改拍摄日期",
+        "batchEditLocation": "批量改GPS",
         "batchDelete": "批量删除"
+      },
+      "pagination": {
+        "summary": "显示第 {start}-{end} 条，共 {total} 条"
       },
       "slideover": {
         "title": "上传照片",
@@ -587,6 +594,41 @@
         },
         "notSupported": "您的浏览器不支持视频播放"
       },
+      "batchEditTagsModal": {
+        "title": "批量修改标签",
+        "description": "为已选中的 {count} 张照片设置标签。",
+        "fields": {
+          "tags": "标签"
+        },
+        "actions": {
+          "cancel": "取消",
+          "save": "保存"
+        }
+      },
+      "batchEditDateModal": {
+        "title": "批量修改拍摄日期",
+        "description": "为已选中的 {count} 张照片设置拍摄日期。",
+        "fields": {
+          "dateTaken": "拍摄日期"
+        },
+        "actions": {
+          "cancel": "取消",
+          "save": "保存"
+        }
+      },
+      "batchEditLocationModal": {
+        "title": "批量修改GPS坐标",
+        "description": "为已选中的 {count} 张照片设置GPS坐标。",
+        "fields": {
+          "latitude": "纬度",
+          "longitude": "经度"
+        },
+        "hint": "纬度范围 -90 到 90，经度范围 -180 到 180。",
+        "actions": {
+          "cancel": "取消",
+          "save": "保存"
+        }
+      },
       "messages": {
         "uploadSuccess": "照片已成功上传，正在处理中...",
         "uploadMultipleSuccess": "已成功上传 {count} 张照片，正在处理中...",
@@ -604,6 +646,15 @@
         "batchDownloadSuccess": "批量下载完成",
         "batchDownloadFailed": "批量下载失败",
         "batchDownloadPartial": "批量下载已完成，部分失败",
+        "batchTagsUpdateSuccess": "已更新 {count} 张照片的标签",
+        "batchTagsUpdateFailed": "批量修改标签失败",
+        "batchDateUpdateSuccess": "已更新 {count} 张照片的拍摄日期",
+        "batchDateUpdateFailed": "批量修改拍摄日期失败",
+        "batchLocationUpdateSuccess": "已更新 {count} 张照片的GPS坐标",
+        "batchLocationUpdateFailed": "批量修改GPS坐标失败",
+        "batchPartialFailed": "有 {count} 张照片更新失败",
+        "invalidDateTaken": "请填写有效的拍摄日期",
+        "invalidGpsCoordinates": "请填写有效的GPS坐标",
         "downloadedCount": "已下载 {count} 张照片",
         "downloadFailedCount": "下载失败 {count} 张照片",
         "downloadPartialCount": "已下载 {success} 张照片，{failed} 张失败",

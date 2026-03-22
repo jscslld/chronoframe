@@ -15,6 +15,13 @@ const { photos } = usePhotos()
 
 const slug = computed(() => (route.params.slug as string[]) || [])
 const photoId = computed(() => slug.value[0] || null)
+const sourceAlbumId = computed(() => {
+  const albumId = route.query.albumId
+  return typeof albumId === 'string' && albumId.trim() ? albumId : null
+})
+const viewerReturnRoute = computed(() =>
+  sourceAlbumId.value ? `/albums/${sourceAlbumId.value}` : null,
+)
 const currentPhoto = computed(() =>
   photos.value.find((photo) => photo.id === photoId.value),
 )
@@ -68,8 +75,8 @@ watch(
         await nextTick()
 
         if (!isViewerOpen.value) {
-          // 直接访问照片详情页时，不设置 returnRoute（传入 null）
-          openViewer(foundIndex, null)
+          // 带 albumId 的详情页视为从相册进入，关闭时返回对应相册页
+          openViewer(foundIndex, viewerReturnRoute.value)
         } else {
           switchToIndex(foundIndex)
         }
