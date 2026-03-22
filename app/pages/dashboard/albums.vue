@@ -227,28 +227,6 @@ const setCoverPhoto = (photoId: string) => {
   coverPhotoId.value = photoId
 }
 
-const areAllPhotosSelected = computed(() => {
-  return (
-    allPhotos.value.length > 0 &&
-    selectedPhotoIds.value.length === allPhotos.value.length
-  )
-})
-
-const areSomePhotosSelected = computed(() => {
-  return (
-    selectedPhotoIds.value.length > 0 &&
-    selectedPhotoIds.value.length < allPhotos.value.length
-  )
-})
-
-const toggleAllPhotos = () => {
-  if (areAllPhotosSelected.value) {
-    selectedPhotoIds.value = []
-  } else {
-    selectedPhotoIds.value = allPhotos.value.map((p) => p.id)
-  }
-}
-
 const filteredPhotos = computed(() => {
   const query = photoSelectorSearchQuery.value.toLowerCase()
   if (!query) return allPhotos.value
@@ -260,6 +238,57 @@ const filteredPhotos = computed(() => {
       (photo.tags || []).includes(query),
   )
 })
+
+const filteredPhotoIds = computed(() =>
+  filteredPhotos.value.map((photo) => photo.id),
+)
+
+const areAllPhotosSelected = computed(() => {
+  return (
+    filteredPhotoIds.value.length > 0 &&
+    filteredPhotoIds.value.every((photoId) =>
+      selectedPhotoIds.value.includes(photoId),
+    )
+  )
+})
+
+const areSomePhotosSelected = computed(() => {
+  const selectedFilteredCount = filteredPhotoIds.value.filter((photoId) =>
+    selectedPhotoIds.value.includes(photoId),
+  ).length
+
+  return (
+    selectedFilteredCount > 0 &&
+    selectedFilteredCount < filteredPhotoIds.value.length
+  )
+})
+
+const toggleAllPhotos = () => {
+  if (filteredPhotoIds.value.length === 0) return
+
+  if (areAllPhotosSelected.value) {
+    const filteredPhotoIdSet = new Set(filteredPhotoIds.value)
+    selectedPhotoIds.value = selectedPhotoIds.value.filter(
+      (photoId) => !filteredPhotoIdSet.has(photoId),
+    )
+
+    if (filteredPhotoIdSet.has(coverPhotoId.value)) {
+      coverPhotoId.value = ''
+    }
+    return
+  }
+
+  const selectedPhotoIdSet = new Set(selectedPhotoIds.value)
+  const nextSelectedPhotoIds = [...selectedPhotoIds.value]
+
+  for (const photoId of filteredPhotoIds.value) {
+    if (!selectedPhotoIdSet.has(photoId)) {
+      nextSelectedPhotoIds.push(photoId)
+    }
+  }
+
+  selectedPhotoIds.value = nextSelectedPhotoIds
+}
 
 onMounted(async () => {
   await Promise.all([loadPhotos(), loadAlbums()])
@@ -716,7 +745,7 @@ const columns: any[] = [
                     }}</span>
                   </div>
                   <UButton
-                    v-show="!areAllPhotosSelected && allPhotos.length > 0"
+                    v-show="!areAllPhotosSelected && filteredPhotos.length > 0"
                     class="sm:hidden"
                     size="sm"
                     color="neutral"
