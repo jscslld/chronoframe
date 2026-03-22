@@ -1712,7 +1712,6 @@ const submitBatchDateUpdate = async () => {
       })
     }
 
-    rowSelection.value = {}
     isBatchDateModalOpen.value = false
     await refresh()
   } catch (error: any) {
@@ -1815,7 +1814,6 @@ const submitBatchLocationUpdate = async () => {
       })
     }
 
-    rowSelection.value = {}
     isBatchLocationModalOpen.value = false
     await refresh()
   } catch (error: any) {
@@ -1887,7 +1885,6 @@ const submitBatchTagsUpdate = async () => {
       })
     }
 
-    rowSelection.value = {}
     isBatchTagsModalOpen.value = false
     await refresh()
   } catch (error: any) {
