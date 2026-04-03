@@ -10,7 +10,6 @@ export default defineNuxtConfig({
   modules: [
     'reka-ui/nuxt',
     '@nuxt/ui',
-    '@nuxt/eslint',
     '@nuxt/fonts',
     '@nuxt/icon',
     '@nuxt/image',
@@ -46,12 +45,12 @@ export default defineNuxtConfig({
       map: {
         provider: 'maplibre' as 'mapbox' | 'maplibre',
         mapbox: {
-          style: ''
+          style: '',
         },
         maplibre: {
           token: '',
           style: '',
-        }
+        },
       },
       analytics: {
         matomo: {
@@ -103,18 +102,18 @@ export default defineNuxtConfig({
         pathField: 'path',
         cdnUrl: '',
       } as {
-        baseUrl: string;
-        rootPath: string;
-        token: string;
+        baseUrl: string
+        rootPath: string
+        token: string
         endpoints: {
-          upload: string;
-          download: string;
-          list: string;
-          delete: string;
-          meta: string;
-        };
-        pathField: string;
-        cdnUrl: string;
+          upload: string
+          download: string
+          list: string
+          delete: string
+          meta: string
+        }
+        pathField: string
+        cdnUrl: string
       },
     },
     upload: {
@@ -128,6 +127,7 @@ export default defineNuxtConfig({
         mode: 'skip' as 'warn' | 'block' | 'skip',
       },
     },
+    /** @deprecated Defaults to allow insecure cookies now */
     allowInsecureCookie: false,
   },
 
@@ -175,7 +175,7 @@ export default defineNuxtConfig({
       noExternal: ['@indoorequal/vue-maplibre-gl'],
     },
     css: {
-      devSourcemap: true,
+      devSourcemap: false,
     },
     build: {
       sourcemap: false,
