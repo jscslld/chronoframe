@@ -12,6 +12,7 @@ import GalleryThumbnail from './GalleryThumbnail.vue'
 import InfoPanel from './InfoPanel.vue'
 import ReactionPicker from './ReactionPicker.vue'
 import ReactionConfetti from './ReactionConfetti.vue'
+import { REACTION_ICON_MAP } from './reaction-definitions'
 import type { LoadingIndicatorRef } from './LoadingIndicator.vue'
 
 interface Props {
@@ -41,26 +42,18 @@ const showZoomLevel = ref(false)
 const zoomLevelTimer = ref<NodeJS.Timeout | null>(null)
 
 const showReactionPicker = ref(false)
+const reactionButtonRef = ref<HTMLButtonElement | null>(null)
+const shouldCloseReactionPickerOnClick = ref(false)
 const selectedReaction = ref<string | null>(null)
 const reactionCounts = ref<Record<string, number>>({})
 const isLoadingReaction = ref(false)
 const confettiIcon = ref<string | null>(null)
 const confettiTriggerCount = ref(0)
 
-// 表态图标映射
-const reactionIcons: Record<string, string> = {
-  like: 'fluent-emoji-flat:thumbs-up',
-  love: 'fluent-emoji-flat:red-heart',
-  amazing: 'fluent-emoji-flat:smiling-face-with-heart-eyes',
-  funny: 'fluent-emoji-flat:face-with-tears-of-joy',
-  wow: 'fluent-emoji-flat:face-with-open-mouth',
-  sad: 'fluent-emoji-flat:crying-face',
-  fire: 'fluent-emoji-flat:fire',
-  sparkle: 'fluent-emoji-flat:sparkles',
-}
-
 const currentReactionIcon = computed(() => {
-  return selectedReaction.value ? reactionIcons[selectedReaction.value] : null
+  const reactionId = selectedReaction.value
+  if (!reactionId) return null
+  return REACTION_ICON_MAP[reactionId as keyof typeof REACTION_ICON_MAP] || null
 })
 
 // 计算总表态数
@@ -415,40 +408,46 @@ const clearConfetti = useDebounceFn(() => {
   confettiIcon.value = null
 }, 1600)
 
+const decreaseReactionCountSafely = (reactionId: string) => {
+  const currentCount = reactionCounts.value[reactionId] || 0
+  reactionCounts.value[reactionId] = Math.max(0, currentCount - 1)
+}
+
 // Reaction handlers
 const handleReactionSelect = async (reactionId: string, iconName: string) => {
-  if (!currentPhoto.value) return
+  if (!currentPhoto.value || isLoadingReaction.value) return
+
+  const photoId = currentPhoto.value.id
+  const previousSelectedReaction = selectedReaction.value
+  const previousReactionCounts = { ...reactionCounts.value }
+  const isRemovingCurrentReaction = previousSelectedReaction === reactionId
 
   isLoadingReaction.value = true
+  showReactionPicker.value = false
+
+  // 乐观更新：先更新本地状态，再发送请求
+  if (isRemovingCurrentReaction) {
+    selectedReaction.value = null
+    decreaseReactionCountSafely(reactionId)
+  } else {
+    if (previousSelectedReaction) {
+      decreaseReactionCountSafely(previousSelectedReaction)
+    }
+    selectedReaction.value = reactionId
+    reactionCounts.value[reactionId] =
+      (reactionCounts.value[reactionId] || 0) + 1
+  }
 
   try {
-    if (selectedReaction.value === reactionId) {
-      // 取消表态
-      await $fetch(`/api/photos/${currentPhoto.value.id}/reactions`, {
+    if (isRemovingCurrentReaction) {
+      await $fetch(`/api/photos/${photoId}/reactions`, {
         method: 'DELETE',
       })
-      selectedReaction.value = null
-      // 减少计数
-      if (reactionCounts.value[reactionId]) {
-        reactionCounts.value[reactionId]--
-      }
     } else {
-      // 如果之前有表态，先减少旧表态的计数
-      const oldReaction = selectedReaction.value
-      if (oldReaction && reactionCounts.value[oldReaction] !== undefined) {
-        reactionCounts.value[oldReaction]--
-      }
-
-      // 添加或更新表态
-      await $fetch(`/api/photos/${currentPhoto.value.id}/reactions`, {
+      await $fetch(`/api/photos/${photoId}/reactions`, {
         method: 'POST',
         body: { reactionType: reactionId },
       })
-
-      selectedReaction.value = reactionId
-      // 增加计数
-      reactionCounts.value[reactionId] =
-        (reactionCounts.value[reactionId] || 0) + 1
 
       // 触发礼花效果
       confettiIcon.value = iconName
@@ -458,6 +457,10 @@ const handleReactionSelect = async (reactionId: string, iconName: string) => {
       clearConfetti()
     }
   } catch (error: any) {
+    // 请求失败时回滚乐观更新
+    selectedReaction.value = previousSelectedReaction
+    reactionCounts.value = previousReactionCounts
+
     console.error('Failed to update reaction:', error)
 
     // 显示错误提示
@@ -479,12 +482,20 @@ const handleReactionSelect = async (reactionId: string, iconName: string) => {
   } finally {
     isLoadingReaction.value = false
   }
-
-  showReactionPicker.value = false
 }
 
 const toggleReactionPicker = () => {
+  if (shouldCloseReactionPickerOnClick.value) {
+    showReactionPicker.value = false
+    shouldCloseReactionPickerOnClick.value = false
+    return
+  }
+
   showReactionPicker.value = !showReactionPicker.value
+}
+
+const handleReactionButtonPointerDown = () => {
+  shouldCloseReactionPickerOnClick.value = showReactionPicker.value
 }
 
 // 监听当前照片变化，加载表态数据
@@ -615,7 +626,7 @@ const swiperModules = [Navigation, Keyboard, Virtual]
                       :name="
                         isLivePhotoMuted ? 'tabler:volume-off' : 'tabler:volume'
                       "
-                      class="size-[17px]"
+                      class="size-4.25"
                     />
                   </div>
                 </div>
@@ -834,6 +845,7 @@ const swiperModules = [Navigation, Keyboard, Virtual]
                           <!-- 表态选择器 -->
                           <ReactionPicker
                             :is-open="showReactionPicker"
+                            :trigger-el="reactionButtonRef"
                             :selected-reaction="selectedReaction"
                             :reaction-counts="reactionCounts"
                             @select="handleReactionSelect"
@@ -849,6 +861,7 @@ const swiperModules = [Navigation, Keyboard, Virtual]
 
                           <!-- 表态按钮 -->
                           <motion.button
+                            ref="reactionButtonRef"
                             type="button"
                             :initial="{ scale: 0.8, opacity: 0 }"
                             :animate="{
@@ -877,6 +890,7 @@ const swiperModules = [Navigation, Keyboard, Virtual]
                                 : 'bg-white/90 dark:bg-neutral-800/90 border-neutral-200/50 dark:border-white/10 text-neutral-700 dark:text-white/80 shadow-black/10 dark:shadow-black/30',
                               'hover:shadow-xl',
                             ]"
+                            @pointerdown="handleReactionButtonPointerDown"
                             @click="toggleReactionPicker"
                           >
                             <Icon

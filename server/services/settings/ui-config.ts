@@ -99,6 +99,51 @@ export const LOCATION_SETTINGS_UI: Record<string, FieldUIConfig> = {
   },
 }
 
+export const PRIVACY_SETTINGS_UI: Record<string, FieldUIConfig> = {
+  'upload.autoEraseLocation': {
+    type: 'toggle',
+    help: 'settings.privacy.upload.autoEraseLocation.help',
+  },
+}
+
+export const SYSTEM_SETTINGS_UI: Record<string, FieldUIConfig> = {
+  'upload.maxFileSize': {
+    type: 'number',
+    help: 'settings.app.upload.maxFileSize.help',
+    min: 1,
+    max: 10240,
+  },
+  'upload.duplicateCheck.enabled': {
+    type: 'toggle',
+    help: 'settings.system.upload.duplicateCheck.enabled.help',
+  },
+  'upload.duplicateCheck.mode': {
+    type: 'tabs',
+    options: [
+      {
+        label: 'settings.system.upload.duplicateCheck.mode.options.skip',
+        value: 'skip',
+        icon: 'tabler:player-track-next',
+      },
+      {
+        label: 'settings.system.upload.duplicateCheck.mode.options.warn',
+        value: 'warn',
+        icon: 'tabler:alert-triangle',
+      },
+      {
+        label: 'settings.system.upload.duplicateCheck.mode.options.block',
+        value: 'block',
+        icon: 'tabler:ban',
+      },
+    ],
+    help: 'settings.system.upload.duplicateCheck.mode.help',
+  },
+  webglImageViewerDebug: {
+    type: 'toggle',
+    help: 'settings.system.webglImageViewerDebug.help',
+  },
+}
+
 export const STORAGE_SETTINGS_UI: Record<string, FieldUIConfig> = {
   provider: {
     type: 'custom',
@@ -270,6 +315,8 @@ export function getSettingUIConfig(
 ): FieldUIConfig | undefined {
   const uiConfigMap: Record<string, Record<string, FieldUIConfig>> = {
     app: APP_SETTINGS_UI,
+    system: SYSTEM_SETTINGS_UI,
+    privacy: PRIVACY_SETTINGS_UI,
     map: MAP_SETTINGS_UI,
     location: LOCATION_SETTINGS_UI,
     storage: STORAGE_SETTINGS_UI,

@@ -1,16 +1,28 @@
 <script lang="ts" setup>
 import { motion } from 'motion-v'
-
+import type { Album } from '~~/server/utils/db'
+interface AlbumWithPhotos extends Album {
+  photoIds?: string[]
+}
 const config = useRuntimeConfig()
 const { photos } = usePhotos()
-const { data: albums } = useAsyncData(
+const { loggedIn } = useUserSession()
+const { data: albums } = useAsyncData<AlbumWithPhotos[]>(
   'albums',
-  // @ts-nocheck
   () => $fetch('/api/albums'),
   {
     watch: [],
   },
 )
+
+// 根据登录状态决定是否过滤隐藏的相册
+// 登录用户可以看到所有相册，未登录用户只能看到非隐藏相册
+const visibleAlbums = computed(() => {
+  if (loggedIn.value) {
+    return albums.value || []
+  }
+  return (albums.value || []).filter((album) => !album.isHidden)
+})
 
 // randomly pick 30 photos for waterfall
 const waterfallPhotos = computed(() =>
@@ -57,10 +69,10 @@ const getPhotoById = (photoId: string) => {
   return photos.value.find((p) => p.id === photoId) || null
 }
 
-const getAlbumDisplayPhotos = (album: any) => {
+const getAlbumDisplayPhotos = (album: AlbumWithPhotos) => {
   if (!album.photoIds || album.photoIds.length === 0) return []
 
-  const displayPhotos = []
+  const displayPhotos: Photo[] = []
 
   // 第一张：优先使用封面照片
   if (album.coverPhotoId) {
@@ -162,7 +174,7 @@ const hoveredAlbum = ref<number | null>(null)
       </div>
       <!-- Overlay -->
       <div
-        class="absolute -inset-1 bg-gradient-to-b from-neutral-100/80 to-white dark:from-neutral-900/80 dark:to-neutral-900"
+        class="absolute -inset-1 bg-linear-to-b from-neutral-100/80 to-white dark:from-neutral-900/80 dark:to-neutral-900"
       />
     </div>
 
@@ -183,7 +195,7 @@ const hoveredAlbum = ref<number | null>(null)
     <!-- Titles -->
     <div class="flex flex-col items-center pt-16 sm:pt-48 pb-24">
       <h1
-        class="font-black text-6xl sm:text-7xl drop-shadow-2xl bg-clip-text bg-gradient-to-br from-neutral-800 to-neutral-400 dark:from-white dark:to-neutral-500 text-transparent"
+        class="font-black text-6xl sm:text-7xl drop-shadow-2xl bg-clip-text bg-linear-to-br from-neutral-800 to-neutral-400 dark:from-white dark:to-neutral-500 text-transparent"
       >
         {{ $t('title.albums').toUpperCase() }}
       </h1>
@@ -200,7 +212,7 @@ const hoveredAlbum = ref<number | null>(null)
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-16"
       >
         <NuxtLink
-          v-for="album in albums"
+          v-for="album in visibleAlbums"
           :key="album.id"
           :to="`/albums/${album.id}`"
           class="block"
@@ -259,7 +271,7 @@ const hoveredAlbum = ref<number | null>(null)
             <!-- Empty state -->
             <div
               v-if="!album.photoIds || album.photoIds.length === 0"
-              class="absolute inset-0 rounded-xl shadow-lg bg-gradient-to-br from-neutral-100 to-neutral-50 dark:from-neutral-700 dark:to-neutral-800 flex flex-col items-center justify-center gap-3 border border-neutral-200 dark:border-neutral-600 group-hover:shadow-xl dark:group-hover:shadow-neutral-900/50 transition-shadow"
+              class="absolute inset-0 rounded-xl shadow-lg bg-linear-to-br from-neutral-100 to-neutral-50 dark:from-neutral-700 dark:to-neutral-800 flex flex-col items-center justify-center gap-3 border border-neutral-200 dark:border-neutral-600 group-hover:shadow-xl dark:group-hover:shadow-neutral-900/50 transition-shadow"
             >
               <Icon
                 name="tabler:library-photo"
@@ -297,7 +309,7 @@ const hoveredAlbum = ref<number | null>(null)
                 >
                   <Icon
                     name="tabler:clock"
-                    class="h-[1lh] size-4"
+                    class="h-lh size-4"
                   />
                   {{ $dayjs(album.createdAt).fromNow() }}
                 </p>

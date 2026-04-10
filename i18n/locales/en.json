@@ -164,14 +164,14 @@
       "add": "React",
       "change": "Reacted",
       "count": "no reactions | {count} reaction | {count} reactions",
-      "like": "like",
-      "love": "love",
-      "amazing": "amazing",
-      "funny": "funny",
-      "wow": "wow",
-      "sad": "sad",
-      "fire": "fire",
-      "sparkle": "sparkle"
+      "like": "Great shot",
+      "love": "Love",
+      "amazing": "Stunning",
+      "funny": "Haha",
+      "wow": "Whoa",
+      "sad": "Touching",
+      "fire": "Hype",
+      "sparkle": "Shine"
     },
     "photoload": {
       "loadError": "Image loading failed",
@@ -364,6 +364,7 @@
     "location": "Location services",
     "generalSettings": "General Settings",
     "appearanceSettings": "Appearance Settings",
+    "privacySettings": "Privacy Settings",
     "mapAndLocation": "Map & Location"
   },
   "auth": {
@@ -389,6 +390,7 @@
   },
   "common": {
     "unknown": "unknown",
+    "unsavedChanges": "There are unsaved changes.",
     "months": {
       "jan": "Jan",
       "feb": "Feb",
@@ -439,7 +441,7 @@
       "warn": {
         "title": "Duplicate File Detected",
         "message": "Photo \"{fileName}\" already exists. Continuing will overwrite the existing photo",
-        "warning": "After overwriting, all information of the original photo (EXIF, tags, reactions, etc.) will be replaced",
+        "warning": "Overwrite the existing photo file",
         "info": "Existing photo: {title}, taken on {dateTaken}"
       }
     },
@@ -538,6 +540,7 @@
       "actions": {
         "reprocess": "Reprocess",
         "refreshLocation": "Re-fetch City",
+        "eraseLocationInfo": "Erase location info",
         "delete": "Delete",
         "editMetadata": "Edit Metadata",
         "previewPhoto": "Photo Preview"
@@ -545,6 +548,7 @@
       "selection": {
         "selected": "{count} / {total} rows selected",
         "batchReprocess": "Reprocess",
+        "batchEraseLocation": "Erase location info",
         "batchDownload": "Download",
         "batchEditTags": "Edit Tags",
         "batchEditDateTaken": "Edit Date Taken",
@@ -557,6 +561,20 @@
       "slideover": {
         "title": "Upload Photos",
         "description": "Drag and drop or select files. Photos will be automatically processed and added to the library.",
+        "options": {
+          "eraseLocation": {
+            "label": "Erase location info on upload",
+            "description": "This upload can override the system default and be toggled on or off anytime."
+          },
+          "duplicateCheck": {
+            "label": "Duplicate file strategy",
+            "descriptionEnabled": "Duplicate detection is enabled and same-name files will follow the selected handling mode.",
+            "descriptionDisabled": "Duplicate detection is disabled and same-name files will continue directly through upload.",
+            "enabled": "Detection enabled",
+            "disabled": "Detection disabled",
+            "currentMode": "Current mode: {mode}"
+          }
+        },
         "buttons": {
           "clear": "Clear Selection",
           "upload": "Upload {count} file(s)"
@@ -631,6 +649,8 @@
         "uploadSuccess": "Photo uploaded successfully, processing...",
         "uploadMultipleSuccess": "{count} photos uploaded successfully, processing...",
         "reprocessSuccess": "Reprocessing task added",
+        "batchReprocessSuccess": "Successfully submitted {count} photos to the reprocessing queue",
+        "batchReprocessing": "Submitting reprocessing tasks...",
         "reprocessTaskId": "Task ID: {taskId}",
         "deleteSuccess": "Photo deleted successfully",
         "batchDeleteSuccess": "Successfully deleted {count} photos",
@@ -671,12 +691,19 @@
         "noChangesProvided": "No changes to apply",
         "queueUnavailable": "Task queue is not available",
         "reverseGeocodeQueued": "Reverse geocoding task queued",
-        "reverseGeocodeFailed": "Failed to queue reverse geocoding"
+        "reverseGeocodeFailed": "Failed to queue reverse geocoding",
+        "eraseLocationQueued": "Erase location info task queued",
+        "eraseLocationFailed": "Failed to queue erase location info task",
+        "batchEraseLocationQueued": "Queued {count} erase-location task(s)",
+        "batchEraseLocationFailed": "Failed to queue batch erase-location tasks"
       },
       "errors": {
         "noSelection": "Please select photos to upload",
         "fileValidationFailed": "File validation failed",
         "allFilesValidationFailed": "All files failed validation",
+        "allFilesTooLarge": "All {count} selected files exceed the maximum size limit ({maxSize}MB).",
+        "filesTooLargeSkipped": "Skipped {count} oversized file(s) (limit {maxSize}MB). Remaining files will continue uploading.",
+        "filesUnsupportedSkipped": "Skipped {count} file(s) with unsupported formats. Remaining files will continue uploading.",
         "unsupportedFormat": "Unsupported file format: {type}. Please select JPEG, PNG, or HEIC photos, or MOV format Live Photo videos.",
         "fileTooLarge": "File too large: {size}MB. Maximum supported: {maxSize}MB.",
         "uploadFailed": "Upload failed",
@@ -712,7 +739,7 @@
           "tagsHint": "Press Enter to add each tag.",
           "location": "Location",
           "locationHint": "Click on the map to set the shooting location.",
-          "clearLocation": "Clear location",
+          "clearLocation": "Erase location info",
           "coordinates": "Coordinates",
           "noLocation": "No location selected",
           "rating": "Rating",
@@ -888,7 +915,8 @@
       "types": {
         "photo": "Photo Processing",
         "live-photo-video": "LivePhoto Video",
-        "photo-reverse-geocoding": "Photo Reverse Geocoding"
+        "photo-reverse-geocoding": "Photo Reverse Geocoding",
+        "photo-erase-location": "Photo Location Erasure"
       },
       "stages": {
         "preprocessing": "Preprocessing",
@@ -896,7 +924,8 @@
         "thumbnail": "Thumbnail",
         "exif": "EXIF Processing",
         "reverse-geocoding": "Geocoding",
-        "live-photo": "LivePhoto Processing"
+        "live-photo": "LivePhoto Processing",
+        "location-erase": "Location Erasure"
       },
       "buttons": {
         "retry": "Retry",
@@ -946,6 +975,39 @@
           "dark": "Dark",
           "system": "System"
         }
+      },
+      "upload": {
+        "maxFileSize": {
+          "label": "Max Upload File Size",
+          "description": "Maximum size of a single uploaded file (MB)",
+          "help": "Takes effect immediately and applies to all users"
+        }
+      }
+    },
+    "system": {
+      "upload": {
+        "duplicateCheck": {
+          "enabled": {
+            "label": "Detect duplicate files on upload",
+            "description": "Detect duplicate photos by filename and apply the selected strategy",
+            "help": "When disabled, duplicate pre-check is skipped and files with the same name continue through upload"
+          },
+          "mode": {
+            "label": "Duplicate file handling mode",
+            "description": "How to handle files detected as duplicates",
+            "help": "Only effective when duplicate detection is enabled",
+            "options": {
+              "skip": "Skip",
+              "warn": "Warn and overwrite",
+              "block": "Block upload"
+            }
+          }
+        }
+      },
+      "webglImageViewerDebug": {
+        "label": "WebGL Image Viewer debug mode",
+        "description": "Control whether the WebGL image viewer shows debug info in production",
+        "help": "When enabled, logged-in users can view the WebGL debug panel in any environment; when disabled, debug info is shown only in development"
       }
     },
     "map": {
@@ -989,6 +1051,15 @@
           "label": "Nominatim Base URL",
           "description": "Base URL for Nominatim reverse geocoding API",
           "help": "Leave empty to use the public Nominatim service by default"
+        }
+      }
+    },
+    "privacy": {
+      "upload": {
+        "autoEraseLocation": {
+          "label": "Automatically erase location info on upload",
+          "description": "Automatically remove EXIF GPS metadata and clear geolocation fields while processing uploaded photos",
+          "help": "When enabled, location erasure will run asynchronously in the processing queue"
         }
       }
     },
@@ -1113,10 +1184,18 @@
   },
   "wizard": {
     "admin": {
-      "username": { "label": "Username" },
-      "email": { "label": "Email" },
-      "password": { "label": "Password" },
-      "confirmPassword": { "label": "Confirm Password" }
+      "username": {
+        "label": "Username"
+      },
+      "email": {
+        "label": "Email"
+      },
+      "password": {
+        "label": "Password"
+      },
+      "confirmPassword": {
+        "label": "Confirm Password"
+      }
     },
     "map": {
       "provider": {

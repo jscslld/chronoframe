@@ -33,7 +33,15 @@ useHead({
   title: $t('title.photos'),
 })
 
-const MAX_FILE_SIZE = 256 // in MB
+const maxFileSizeMB = computed(() => {
+  const val = getSetting('system:upload.maxFileSize')
+  return typeof val === 'number' ? val : 256
+})
+
+const systemUploadEraseLocationDefault = computed(() => {
+  const val = getSetting('privacy:upload.autoEraseLocation')
+  return typeof val === 'boolean' ? val : false
+})
 
 const dayjs = useDayjs()
 
@@ -48,6 +56,7 @@ const totalSelectedFilters = computed(() => {
 })
 
 const reverseGeocodeLoading = ref<Record<string, boolean>>({})
+const eraseLocationLoading = ref<Record<string, boolean>>({})
 
 const setReverseGeocodeLoading = (photoId: string, loading: boolean) => {
   if (loading) {
@@ -58,6 +67,18 @@ const setReverseGeocodeLoading = (photoId: string, loading: boolean) => {
   } else {
     const { [photoId]: _removed, ...rest } = reverseGeocodeLoading.value
     reverseGeocodeLoading.value = rest
+  }
+}
+
+const setEraseLocationLoading = (photoId: string, loading: boolean) => {
+  if (loading) {
+    eraseLocationLoading.value = {
+      ...eraseLocationLoading.value,
+      [photoId]: true,
+    }
+  } else {
+    const { [photoId]: _removed, ...rest } = eraseLocationLoading.value
+    eraseLocationLoading.value = rest
   }
 }
 
@@ -98,6 +119,7 @@ interface UploadingFile {
   stage?: PipelineQueueItem['statusStage'] | null
   progress?: number
   error?: string
+  warning?: string
   taskId?: number
   signedUrlResponse?: { signedUrl: string; fileKey: string; expiresIn: number }
   uploadProgress?: {
@@ -269,7 +291,11 @@ function onCoordinateInput(val) {
   locationSelection.value = { latitude:lat, longitude:lng }
 }
 
-const uploadImage = async (file: File, existingFileId?: string) => {
+const uploadImage = async (
+  file: File,
+  existingFileId?: string,
+  eraseLocationOnUpload?: boolean,
+) => {
   const fileName = file.name
   const fileId = existingFileId || `${Date.now()}-${fileName}`
 
@@ -293,6 +319,7 @@ const uploadImage = async (file: File, existingFileId?: string) => {
     // 更新现有条目的状态和回调
     uploadingFile.status = 'preparing'
     uploadingFile.canAbort = false
+    uploadingFile.warning = undefined
     uploadingFile.abortUpload = () => uploadManager.abortUpload()
     uploadingFiles.value = new Map(uploadingFiles.value)
   }
@@ -315,8 +342,29 @@ const uploadImage = async (file: File, existingFileId?: string) => {
       uploadingFile.status = 'skipped'
       uploadingFile.progress = 100
       uploadingFile.canAbort = false
+      uploadingFile.error =
+        signedUrlResponse.message ||
+        $t('upload.duplicate.skip.message', { fileName })
+
+      toast.add({
+        title: signedUrlResponse.title || $t('upload.duplicate.skip.title'),
+        description:
+          signedUrlResponse.message ||
+          $t('upload.duplicate.skip.message', { fileName }),
+        color: 'warning',
+      })
+
       uploadingFiles.value = new Map(uploadingFiles.value)
       return
+    }
+
+    if (signedUrlResponse.warningInfo) {
+      uploadingFile.error = undefined
+      uploadingFile.warning =
+        signedUrlResponse.warningInfo.warning ||
+        signedUrlResponse.warningInfo.message
+
+      uploadingFiles.value = new Map(uploadingFiles.value)
     }
 
     uploadingFile.status = 'uploading'
@@ -366,6 +414,13 @@ const uploadImage = async (file: File, existingFileId?: string) => {
               payload: {
                 type: isMovFile ? 'live-photo-video' : 'photo',
                 storageKey: signedUrlResponse.fileKey,
+                ...(isMovFile
+                  ? {}
+                  : {
+                      eraseLocation:
+                        eraseLocationOnUpload ??
+                        systemUploadEraseLocationDefault.value,
+                    }),
               },
               priority: isMovFile ? 0 : 1, // Live Photo 视频优先级更低，确保图片优先处理
               maxAttempts: 3,
@@ -394,8 +449,18 @@ const uploadImage = async (file: File, existingFileId?: string) => {
         }
       },
       onError: (error: string) => {
-        uploadingFile.status = 'error'
-        uploadingFile.error = error
+        const isConflict = /\b409\b|Conflict/i.test(error)
+
+        if (isConflict) {
+          uploadingFile.status = 'blocked'
+          uploadingFile.error = $t('upload.duplicate.block.message', {
+            fileName,
+          })
+        } else {
+          uploadingFile.status = 'error'
+          uploadingFile.error = error
+        }
+
         uploadingFile.canAbort = false
         uploadingFiles.value = new Map(uploadingFiles.value)
       },
@@ -405,10 +470,24 @@ const uploadImage = async (file: File, existingFileId?: string) => {
     uploadingFile.canAbort = false
 
     // 处理重复文件阻止模式的错误
-    if (error.statusCode === 409 && error.data?.duplicate) {
+    const isDuplicateConflict =
+      (error.statusCode === 409 ||
+        error.status === 409 ||
+        error.response?.status === 409) &&
+      (error.data?.duplicate || /Conflict|409/i.test(error.message || ''))
+
+    if (isDuplicateConflict) {
       uploadingFile.status = 'blocked'
       uploadingFile.error =
-        error.data.title || $t('upload.duplicate.block.title')
+        error.data.message || $t('upload.duplicate.block.message', { fileName })
+
+      toast.add({
+        title: error.data?.title || $t('upload.duplicate.block.title'),
+        description:
+          error.data?.message ||
+          $t('upload.duplicate.block.message', { fileName }),
+        color: 'error',
+      })
     } else {
       // 其他错误
       uploadingFile.error =
@@ -438,6 +517,7 @@ const uploadImage = async (file: File, existingFileId?: string) => {
 const toast = useToast()
 const selectedFiles = ref<File[]>([])
 const isUploadSlideoverOpen = ref(false)
+const uploadEraseLocationEnabled = ref(systemUploadEraseLocationDefault.value)
 
 const hasSelectedFiles = computed(() => selectedFiles.value.length > 0)
 
@@ -469,10 +549,12 @@ const clearSelectedFiles = () => {
 watch(isUploadSlideoverOpen, (open) => {
   if (!open) {
     clearSelectedFiles()
+    uploadEraseLocationEnabled.value = systemUploadEraseLocationDefault.value
   }
 })
 
 const openUploadSlideover = () => {
+  uploadEraseLocationEnabled.value = systemUploadEraseLocationDefault.value
   isUploadSlideoverOpen.value = true
 }
 
@@ -1094,7 +1176,13 @@ const columns: TableColumn<Photo>[] = [
 ]
 
 // 文件验证函数
-const validateFile = (file: File): { valid: boolean; error?: string } => {
+const validateFile = (
+  file: File,
+): {
+  valid: boolean
+  error?: string
+  reason?: 'unsupported-format' | 'file-too-large'
+} => {
   // 检查文件类型
   const allowedTypes = [
     'image/jpeg',
@@ -1113,19 +1201,21 @@ const validateFile = (file: File): { valid: boolean; error?: string } => {
   if (!isValidImageType && !isValidImageExtension && !isValidVideoExtension) {
     return {
       valid: false,
+      reason: 'unsupported-format',
       error: $t('dashboard.photos.errors.unsupportedFormat', {
         type: file.type,
       }),
     }
   }
 
-  const maxSize = MAX_FILE_SIZE * 1024 * 1024
+  const maxSize = maxFileSizeMB.value * 1024 * 1024
   if (file.size > maxSize) {
     return {
       valid: false,
+      reason: 'file-too-large',
       error: $t('dashboard.photos.errors.fileTooLarge', {
         size: (file.size / 1024 / 1024).toFixed(2),
-        maxSize: MAX_FILE_SIZE,
+        maxSize: maxFileSizeMB.value,
       }),
     }
   }
@@ -1141,6 +1231,8 @@ const handleUpload = async () => {
   }
 
   const errors: string[] = []
+  let tooLargeCount = 0
+  let unsupportedCount = 0
 
   // 先验证所有文件
   const validFiles: File[] = []
@@ -1150,6 +1242,11 @@ const handleUpload = async () => {
     const validation = validateFile(file)
     if (!validation.valid) {
       errors.push(`${file.name}: ${validation.error}`)
+      if (validation.reason === 'file-too-large') {
+        tooLargeCount += 1
+      } else if (validation.reason === 'unsupported-format') {
+        unsupportedCount += 1
+      }
     } else {
       validFiles.push(file)
       // 为每个有效文件生成唯一ID
@@ -1159,13 +1256,43 @@ const handleUpload = async () => {
   }
 
   if (validFiles.length === 0) {
-    toast.add({
-      title: $t('dashboard.photos.messages.error'),
-      description: $t('dashboard.photos.errors.allFilesValidationFailed'),
-      color: 'error',
-    })
-    selectedFiles.value = []
+    if (tooLargeCount > 0 && unsupportedCount === 0) {
+      toast.add({
+        title: $t('upload.error.tooLarge.title'),
+        description: $t('dashboard.photos.errors.allFilesTooLarge', {
+          count: tooLargeCount,
+          maxSize: maxFileSizeMB.value,
+        }),
+        color: 'error',
+      })
+    } else {
+      toast.add({
+        title: $t('dashboard.photos.messages.error'),
+        description: $t('dashboard.photos.errors.allFilesValidationFailed'),
+        color: 'error',
+      })
+    }
+
     return
+  }
+
+  if (tooLargeCount > 0) {
+    toast.add({
+      title: $t('upload.error.tooLarge.title'),
+      description: $t('dashboard.photos.errors.filesTooLargeSkipped', {
+        count: tooLargeCount,
+        maxSize: maxFileSizeMB.value,
+      }),
+      color: 'warning',
+    })
+  } else if (unsupportedCount > 0) {
+    toast.add({
+      title: $t('dashboard.photos.errors.fileValidationFailed'),
+      description: $t('dashboard.photos.errors.filesUnsupportedSkipped', {
+        count: unsupportedCount,
+      }),
+      color: 'warning',
+    })
   }
 
   // 立即为所有有效文件创建队列条目，状态为 waiting
@@ -1195,7 +1322,7 @@ const handleUpload = async () => {
   const startUpload = async (file: File): Promise<void> => {
     const fileId = fileIdMapping.get(file)!
     try {
-      uploadImage(file, fileId)
+      await uploadImage(file, fileId, uploadEraseLocationEnabled.value)
     } catch (error: any) {
       errors.push(`${file.name}: ${error.message || '上传失败'}`)
       console.error('上传错误:', error)
@@ -1281,6 +1408,32 @@ const clearSelectedLocation = () => {
   locationTouched.value = true
 }
 
+const enqueueEraseLocationTask = async (photo: Photo) => {
+  if (!photo?.id) {
+    throw new Error($t('dashboard.photos.messages.photoNotFound'))
+  }
+
+  const result = await $fetch('/api/queue/add-task', {
+    method: 'POST',
+    body: {
+      payload: {
+        type: 'photo-erase-location',
+        photoId: photo.id,
+      },
+      priority: 2,
+      maxAttempts: 3,
+    },
+  })
+
+  if (!result.success) {
+    throw new Error(
+      result?.message || $t('dashboard.photos.messages.eraseLocationFailed'),
+    )
+  }
+
+  return result.taskId
+}
+
 const saveMetadataChanges = async () => {
   if (!editingPhoto.value || !isMetadataDirty.value) {
     return
@@ -1308,34 +1461,53 @@ const saveMetadataChanges = async () => {
       payload.tags = [...editFormState.tags]
     }
 
-    if (locationChanged.value) {
-      payload.location = locationSelection.value
-        ? {
-            latitude: locationSelection.value.latitude,
-            longitude: locationSelection.value.longitude,
-          }
-        : null
+    const shouldQueueLocationErase =
+      locationChanged.value && locationSelection.value === null
+
+    if (locationChanged.value && locationSelection.value) {
+      payload.location = {
+        latitude: locationSelection.value.latitude,
+        longitude: locationSelection.value.longitude,
+      }
     }
 
     if (ratingChanged.value) {
       payload.rating = editFormState.rating
     }
 
-    if (Object.keys(payload).length === 0) {
+    let hasAnySuccessfulAction = false
+
+    if (Object.keys(payload).length > 0) {
+      await $fetch(`/api/photos/${editingPhoto.value.id}`, {
+        method: 'PUT',
+        body: payload,
+      })
+
+      toast.add({
+        title: $t('dashboard.photos.messages.metadataUpdateSuccess'),
+        description: '',
+        color: 'success',
+      })
+      hasAnySuccessfulAction = true
+    }
+
+    if (shouldQueueLocationErase) {
+      const taskId = await enqueueEraseLocationTask(editingPhoto.value)
+      toast.add({
+        title: $t('dashboard.photos.messages.eraseLocationQueued'),
+        description:
+          typeof taskId === 'number'
+            ? $t('dashboard.photos.messages.reprocessTaskId', { taskId })
+            : '',
+        color: 'success',
+      })
+      hasAnySuccessfulAction = true
+    }
+
+    if (!hasAnySuccessfulAction) {
       isEditModalOpen.value = false
       return
     }
-
-    await $fetch(`/api/photos/${editingPhoto.value.id}`, {
-      method: 'PUT',
-      body: payload,
-    })
-
-    toast.add({
-      title: $t('dashboard.photos.messages.metadataUpdateSuccess'),
-      description: '',
-      color: 'success',
-    })
 
     await refresh()
     isEditModalOpen.value = false
@@ -1427,6 +1599,41 @@ const handleReverseGeocodeRequest = async (photo: Photo) => {
   }
 }
 
+const handleEraseLocationRequest = async (photo: Photo) => {
+  if (!photo?.id) {
+    return
+  }
+
+  setEraseLocationLoading(photo.id, true)
+
+  try {
+    const taskId = await enqueueEraseLocationTask(photo)
+    toast.add({
+      title: $t('dashboard.photos.messages.eraseLocationQueued'),
+      description:
+        typeof taskId === 'number'
+          ? $t('dashboard.photos.messages.reprocessTaskId', { taskId })
+          : '',
+      color: 'success',
+    })
+  } catch (error: any) {
+    console.error('Failed to enqueue erase location task:', error)
+    const message =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      error?.message ||
+      $t('dashboard.photos.messages.eraseLocationFailed')
+
+    toast.add({
+      title: $t('dashboard.photos.messages.eraseLocationFailed'),
+      description: message,
+      color: 'error',
+    })
+  } finally {
+    setEraseLocationLoading(photo.id, false)
+  }
+}
+
 // 重新处理单张照片
 const handleReprocessSingle = async (photo: Photo) => {
   try {
@@ -1484,6 +1691,7 @@ const handleReprocessSingle = async (photo: Photo) => {
 
 const getRowActions = (photo: Photo) => {
   const isReverseLoading = !!reverseGeocodeLoading.value[photo.id]
+  const isEraseLocationLoading = !!eraseLocationLoading.value[photo.id]
 
   return [
     [
@@ -1507,6 +1715,14 @@ const getRowActions = (photo: Photo) => {
         disabled: isReverseLoading,
         onSelect() {
           handleReverseGeocodeRequest(photo)
+        },
+      },
+      {
+        label: $t('dashboard.photos.actions.eraseLocationInfo'),
+        icon: isEraseLocationLoading ? 'tabler:loader-2' : 'tabler:map-off',
+        disabled: isEraseLocationLoading,
+        onSelect() {
+          handleEraseLocationRequest(photo)
         },
       },
       {
@@ -2023,7 +2239,7 @@ const handleBatchReprocess = async () => {
 
   try {
     const reprocessToast = toast.add({
-      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      title: $t('dashboard.photos.messages.batchReprocessing'),
       description: '',
       color: 'info',
     })
@@ -2045,7 +2261,7 @@ const handleBatchReprocess = async () => {
     if (result.success) {
       toast.update(reprocessToast.id, {
         title: $t('dashboard.photos.messages.reprocessSuccess'),
-        description: $t('dashboard.queue.title', {
+        description: $t('dashboard.photos.messages.batchReprocessSuccess', {
           count: photosWithStorageKey.length,
         }),
         color: 'success',
@@ -2067,6 +2283,91 @@ const handleBatchReprocess = async () => {
       description: error.message || $t('dashboard.photos.messages.error'),
       color: 'error',
     })
+  }
+}
+
+// 批量抹除位置信息
+const handleBatchEraseLocation = async () => {
+  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
+  const selectedPhotos =
+    selectedRowModel?.rows.map((row: any) => row.original) || []
+
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    return
+  }
+
+  const targetPhotoIds = selectedPhotos
+    .map((photo: Photo) => photo.id)
+    .filter((id): id is string => !!id)
+
+  if (targetPhotoIds.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.photoNotFound'),
+      description: '',
+      color: 'error',
+    })
+    return
+  }
+
+  for (const photoId of targetPhotoIds) {
+    setEraseLocationLoading(photoId, true)
+  }
+
+  try {
+    const result = await $fetch('/api/queue/add-tasks', {
+      method: 'POST',
+      body: {
+        tasks: targetPhotoIds.map((photoId) => ({
+          payload: {
+            type: 'photo-erase-location',
+            photoId,
+          },
+          priority: 2,
+          maxAttempts: 3,
+        })),
+      },
+    })
+
+    if (result.success) {
+      toast.add({
+        title: $t('dashboard.photos.messages.batchEraseLocationQueued', {
+          count: targetPhotoIds.length,
+        }),
+        description: '',
+        color: 'success',
+      })
+      rowSelection.value = {}
+    } else {
+      toast.add({
+        title: $t('dashboard.photos.messages.batchEraseLocationFailed'),
+        description:
+          result?.message ||
+          $t('dashboard.photos.messages.batchEraseLocationFailed'),
+        color: 'error',
+      })
+    }
+  } catch (error: any) {
+    console.error('批量抹除位置信息入队失败:', error)
+    const message =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      error?.message ||
+      $t('dashboard.photos.messages.batchEraseLocationFailed')
+
+    toast.add({
+      title: $t('dashboard.photos.messages.batchEraseLocationFailed'),
+      description: message,
+      color: 'error',
+    })
+  } finally {
+    for (const photoId of targetPhotoIds) {
+      setEraseLocationLoading(photoId, false)
+    }
   }
 }
 
@@ -2203,11 +2504,34 @@ onUnmounted(() => {
 <template>
   <UDashboardPanel>
     <template #header>
-      <UDashboardNavbar :title="$t('dashboard.photos.toolbar.title')" />
+      <UDashboardNavbar :title="$t('dashboard.photos.toolbar.title')">
+        <template #right>
+          <div class="flex gap-2 items-center">
+            <UButton
+              variant="soft"
+              color="neutral"
+              icon="tabler:list-check"
+              @click="$router.push('/dashboard/queue')"
+            >
+              <span class="hidden sm:inline">{{
+                $t('dashboard.photos.buttons.queue')
+              }}</span>
+            </UButton>
+            <UButton
+              icon="tabler:cloud-upload"
+              @click="openUploadSlideover"
+            >
+              <span class="hidden sm:inline">{{
+                $t('dashboard.photos.buttons.upload')
+              }}</span>
+            </UButton>
+          </div>
+        </template>
+      </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-4 h-full flex-1 min-h-0">
         <!-- 上传队列容器 -->
         <UploadQueuePanel
           :uploading-files="uploadingFiles"
@@ -2215,118 +2539,8 @@ onUnmounted(() => {
           @clear-completed="clearCompletedUploads"
           @clear-all="clearAllUploads"
           @go-to-queue="$router.push('/dashboard/queue')"
+          class="shrink-0"
         />
-
-        <!-- 文件上传入口 -->
-        <div
-          class="relative overflow-hidden rounded-3xl border border-neutral-200/80 bg-linear-to-br from-white via-white to-neutral-50 shadow-sm transition dark:border-neutral-800/70 dark:from-neutral-900 dark:via-neutral-900/80 dark:to-neutral-900"
-        >
-          <div
-            class="pointer-events-none absolute -left-32 -top-24 h-72 w-[18rem] rounded-full bg-primary-400/20 blur-3xl dark:bg-primary-500/20"
-          />
-          <div class="relative flex flex-col gap-6 p-5 sm:p-8">
-            <div
-              class="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="space-y-4">
-                <div class="flex items-center gap-3">
-                  <span
-                    class="flex size-12 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300"
-                  >
-                    <Icon
-                      name="tabler:cloud-upload"
-                      class="size-6"
-                    />
-                  </span>
-                  <div>
-                    <h2
-                      class="text-lg font-semibold text-neutral-800 dark:text-neutral-100"
-                    >
-                      {{ $t('dashboard.photos.title') }}
-                    </h2>
-                    <i18n-t
-                      keypath="dashboard.photos.subtitle"
-                      tag="p"
-                      class="mt-1 text-sm text-neutral-500 dark:text-neutral-400"
-                    >
-                      <template #default>
-                        <NuxtLink
-                          to="/dashboard/albums"
-                          class="text-primary font-medium"
-                        >
-                          {{ $t('title.albums') }}
-                        </NuxtLink>
-                      </template>
-                    </i18n-t>
-                  </div>
-                </div>
-                <div
-                  class="flex flex-wrap items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400"
-                >
-                  <UBadge
-                    variant="soft"
-                    color="primary"
-                    size="sm"
-                  >
-                    JPEG / PNG
-                  </UBadge>
-                  <UBadge
-                    variant="soft"
-                    color="primary"
-                    size="sm"
-                  >
-                    HEIC
-                  </UBadge>
-                  <UBadge
-                    variant="soft"
-                    color="primary"
-                    size="sm"
-                  >
-                    {{ $t('ui.livePhoto') }}
-                  </UBadge>
-                  <UBadge
-                    variant="soft"
-                    color="primary"
-                    size="sm"
-                  >
-                    Motion Photo
-                  </UBadge>
-                  <UBadge
-                    variant="outline"
-                    color="neutral"
-                    size="sm"
-                  >
-                    {{
-                      $t('dashboard.photos.maxFileSize', {
-                        size: MAX_FILE_SIZE,
-                      })
-                    }}
-                  </UBadge>
-                </div>
-              </div>
-
-              <div class="flex gap-2 items-center">
-                <UButton
-                  variant="soft"
-                  size="lg"
-                  class="w-full sm:w-auto"
-                  icon="tabler:list-check"
-                  @click="$router.push('/dashboard/queue')"
-                >
-                  {{ $t('dashboard.photos.buttons.queue') }}
-                </UButton>
-                <UButton
-                  size="lg"
-                  class="w-full sm:w-auto"
-                  icon="tabler:cloud-upload"
-                  @click="openUploadSlideover"
-                >
-                  {{ $t('dashboard.photos.buttons.upload') }}
-                </UButton>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <USlideover
           v-model:open="isUploadSlideoverOpen"
@@ -2342,39 +2556,69 @@ onUnmounted(() => {
           }"
         >
           <template #body>
-            <UFileUpload
-              v-model="selectedFiles"
-              :label="$t('dashboard.photos.uploader.label')"
-              :description="
-                $t('dashboard.photos.uploader.description', {
-                  maxSize: MAX_FILE_SIZE,
-                })
-              "
-              icon="tabler:cloud-upload"
-              layout="list"
-              size="xl"
-              accept="image/jpeg,image/png,image/heic,image/heif,video/quicktime,.mov"
-              multiple
-              highlight
-              dropzone
-              :file-delete="{ variant: 'soft', color: 'neutral' }"
-              :ui="{
-                root: 'w-full',
-                base: 'group relative flex flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-neutral-200/80 bg-white/90 px-6 py-12 text-center shadow-sm transition-all duration-300 hover:border-primary-400/80 hover:bg-primary-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-neutral-700/70 dark:bg-neutral-900/80',
-                wrapper: 'flex flex-col items-center gap-2',
-                label:
-                  'text-base font-semibold text-neutral-800 dark:text-neutral-100',
-                description: 'text-sm text-neutral-500 dark:text-neutral-400',
-                files: 'mt-2 flex w-full flex-col gap-2 overflow-y-auto',
-                file: 'flex items-center justify-between gap-3 rounded-2xl border border-neutral-200/80 bg-white/80 px-4 py-3 text-left shadow-sm shadow-black/5 backdrop-blur-sm dark:border-neutral-800/80 dark:bg-neutral-900/70',
-                fileLeadingAvatar: 'ring-1 ring-white/80 dark:ring-neutral-800',
-                fileWrapper: 'min-w-0 flex-1',
-                fileName:
-                  'text-sm font-medium text-neutral-700 dark:text-neutral-100 truncate',
-                fileSize: 'text-xs text-neutral-500 dark:text-neutral-400',
-                fileTrailingButton: 'text-neutral-400 hover:text-error-500',
-              }"
-            />
+            <div class="space-y-4">
+              <UFileUpload
+                v-model="selectedFiles"
+                :label="$t('dashboard.photos.uploader.label')"
+                :description="
+                  $t('dashboard.photos.uploader.description', {
+                    maxSize: maxFileSizeMB,
+                  })
+                "
+                icon="tabler:cloud-upload"
+                layout="list"
+                size="xl"
+                accept="image/jpeg,image/png,image/heic,image/heif,video/quicktime,.mov"
+                multiple
+                highlight
+                dropzone
+                :file-delete="{ variant: 'soft', color: 'neutral' }"
+                :ui="{
+                  root: 'w-full',
+                  base: 'group relative flex flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-neutral-200/80 bg-white/90 px-6 py-12 text-center shadow-sm transition-all duration-300 hover:border-primary-400/80 hover:bg-primary-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-neutral-700/70 dark:bg-neutral-900/80',
+                  wrapper: 'flex flex-col items-center gap-2',
+                  label:
+                    'text-base font-semibold text-neutral-800 dark:text-neutral-100',
+                  description: 'text-sm text-neutral-500 dark:text-neutral-400',
+                  files: 'mt-2 flex w-full flex-col gap-2 overflow-y-auto',
+                  file: 'flex items-center justify-between gap-3 rounded-2xl border border-neutral-200/80 bg-white/80 px-4 py-3 text-left shadow-sm shadow-black/5 backdrop-blur-sm dark:border-neutral-800/80 dark:bg-neutral-900/70',
+                  fileLeadingAvatar:
+                    'ring-1 ring-white/80 dark:ring-neutral-800',
+                  fileWrapper: 'min-w-0 flex-1',
+                  fileName:
+                    'text-sm font-medium text-neutral-700 dark:text-neutral-100 truncate',
+                  fileSize: 'text-xs text-neutral-500 dark:text-neutral-400',
+                  fileTrailingButton: 'text-neutral-400 hover:text-error-500',
+                }"
+              />
+
+              <UCard
+                variant="soft"
+                class="border border-neutral-200/80 dark:border-neutral-800/80"
+              >
+                <div class="flex items-start justify-between gap-4">
+                  <div class="space-y-1">
+                    <p
+                      class="text-sm font-medium text-neutral-800 dark:text-neutral-100"
+                    >
+                      {{
+                        $t(
+                          'dashboard.photos.slideover.options.eraseLocation.label',
+                        )
+                      }}
+                    </p>
+                    <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                      {{
+                        $t(
+                          'dashboard.photos.slideover.options.eraseLocation.description',
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <USwitch v-model="uploadEraseLocationEnabled" />
+                </div>
+              </UCard>
+            </div>
           </template>
 
           <template #footer>
@@ -2421,21 +2665,29 @@ onUnmounted(() => {
           </template>
         </USlideover>
 
-        <!-- 工具栏 -->
+        <!-- 统合容器：工具栏 + 照片列表 -->
         <div
-          class="flex flex-row sm:items-center justify-between gap-3 sm:gap-0 p-3 sm:p-4 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-lg"
+          class="relative flex-1 min-h-0 flex flex-col bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800/80 rounded-2xl shadow-sm overflow-hidden"
         >
-          <div class="flex items-center gap-2">
-            <UIcon
-              name="tabler:photo"
-              class="text-neutral-500"
-            />
-            <span
-              class="font-medium text-neutral-700 dark:text-neutral-300 hidden sm:inline"
-            >
-              {{ $t('dashboard.photos.toolbar.title') }}
-            </span>
-            <div class="flex items-center gap-1 sm:gap-2">
+          <!-- 工具栏 -->
+          <div
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:px-4 sm:py-3 bg-neutral-50/50 dark:bg-neutral-900/50 backdrop-blur-sm border-b border-neutral-200/80 dark:border-neutral-800/80 z-20"
+          >
+            <div class="flex items-center gap-3">
+              <div
+                class="flex size-8 items-center justify-center rounded-[10px] bg-neutral-200/50 dark:bg-neutral-800/50 border border-neutral-200/50 dark:border-neutral-700/50"
+              >
+                <UIcon
+                  name="tabler:photo"
+                  class="size-4.5 text-neutral-600 dark:text-neutral-400"
+                />
+              </div>
+              <span
+                class="font-semibold text-sm text-neutral-700 dark:text-neutral-300 hidden sm:inline"
+              >
+                {{ $t('dashboard.photos.toolbar.title') }}
+              </span>
+              <div class="flex items-center gap-1 sm:gap-2 sm:ml-1">
               <UBadge
                 v-if="livePhotoStats.staticPhotos > 0"
                 variant="soft"
@@ -2584,9 +2836,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 照片列表 -->
-        <div
-          class="border border-neutral-300 dark:border-neutral-800 rounded overflow-hidden"
-        >
+        <div class="relative flex-1 min-h-0 flex flex-col">
           <UTable
             ref="table"
             v-model:row-selection="rowSelection"
@@ -2598,9 +2848,31 @@ onUnmounted(() => {
             :columns="columns"
             :loading="status === 'pending'"
             sticky
-            class="h-[calc(100vh-27rem)] sm:h-[calc(100vh-24.5rem)]"
+            class="h-full flex-1"
             :ui="{
-              separator: 'bg-neutral-200 dark:bg-neutral-700',
+              wrapper: 'relative scroll-smooth h-full overflow-auto',
+              base: 'min-w-full table-fixed',
+              divide:
+                'divide-y divide-neutral-200/80 dark:divide-neutral-800/80',
+              thead:
+                'bg-neutral-50/80 dark:bg-neutral-900/80 backdrop-blur-md sticky top-0 z-10 whitespace-nowrap',
+              tbody:
+                'divide-y divide-neutral-200/80 dark:divide-neutral-800/80 bg-white dark:bg-neutral-900',
+              tr: {
+                base: 'hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50 transition-colors',
+                selected: 'bg-primary-50/50 dark:bg-primary-900/20',
+              },
+              th: {
+                base: 'text-left rtl:text-right ',
+                padding: 'px-4 py-3.5',
+                color: 'text-neutral-500 dark:text-neutral-400',
+                font: 'font-medium text-sm',
+              },
+              td: {
+                padding: 'px-4 py-3',
+                color: 'text-neutral-700 dark:text-neutral-300 text-sm',
+              },
+              separator: 'bg-neutral-200/80 dark:bg-neutral-800/80',
             }"
           >
             <template #actions-cell="{ row }">
@@ -2623,47 +2895,70 @@ onUnmounted(() => {
             </template>
           </UTable>
 
-          <!-- 选择状态信息和批量操作 -->
-          <div
-            class="px-4 py-4 border-t border-neutral-200 dark:border-neutral-700 space-y-3"
+          <!-- 悬浮版批量操作菜单 -->
+          <transition
+            enter-active-class="transition-all duration-300 ease-out"
+            enter-from-class="translate-y-8 opacity-0 scale-95"
+            enter-to-class="translate-y-0 opacity-100 scale-100"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="translate-y-0 opacity-100 scale-100"
+            leave-to-class="translate-y-8 opacity-0 scale-95"
           >
             <div
-              class="text-sm text-neutral-600 dark:text-neutral-400 flex items-center gap-2"
+              v-if="selectedRowsCount > 0"
+              class="fixed bottom-8 left-1/2 -translate-x-1/2 px-2 py-1.5 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-xl shadow-xl rounded-full border border-neutral-200/80 dark:border-neutral-800/80 z-60 flex items-center gap-3 sm:gap-6 shadow-black/5 dark:shadow-black/20"
             >
-              <div class="leading-6">
-                {{
-                  $t('dashboard.photos.selection.selected', {
-                    count: selectedRowsCount,
-                    total: totalRowsCount,
-                  })
-                }}
-              </div>
               <div
-                v-if="selectedRowsCount > 0"
-                class="flex items-center gap-1 sm:gap-2"
+                class="pl-4 pr-1 border-r border-neutral-200 dark:border-neutral-800 min-w-max"
               >
+                <p
+                  class="text-sm font-medium tracking-wide text-neutral-700 dark:text-neutral-200"
+                >
+                  {{
+                    $t('dashboard.photos.selection.selected', {
+                      count: selectedRowsCount,
+                      total: totalRowsCount,
+                    })
+                  }}
+                </p>
+              </div>
+
+              <div class="flex items-center gap-1 sm:gap-1.5 pr-2">
                 <UButton
-                  variant="soft"
-                  color="info"
-                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
                   icon="tabler:refresh"
-                  class="flex-1 sm:flex-none"
                   @click="handleBatchReprocess"
                 >
-                  <span>{{
+                  <span class="hidden sm:inline">{{
                     $t('dashboard.photos.selection.batchReprocess')
                   }}</span>
                 </UButton>
 
                 <UButton
-                  variant="soft"
-                  color="primary"
-                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
+                  icon="tabler:map-off"
+                  @click="handleBatchEraseLocation"
+                >
+                  <span class="hidden sm:inline">{{
+                    $t('dashboard.photos.selection.batchEraseLocation')
+                  }}</span>
+                </UButton>
+
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
                   icon="tabler:download"
-                  class="flex-1 sm:flex-none"
                   @click="handleBatchDownload"
                 >
-                  <span>{{
+                  <span class="hidden sm:inline">{{
                     $t('dashboard.photos.selection.batchDownload')
                   }}</span>
                 </UButton>
@@ -2709,13 +3004,13 @@ onUnmounted(() => {
 
                 <UButton
                   color="error"
-                  variant="soft"
-                  size="xs"
+                  variant="ghost"
+                  size="sm"
+                  class="rounded-full hover:bg-error-50 dark:hover:bg-error-500/20"
                   icon="tabler:trash"
-                  class="flex-1 sm:flex-none"
                   @click="handleBatchDelete"
                 >
-                  <span>{{
+                  <span class="hidden sm:inline">{{
                     $t('dashboard.photos.selection.batchDelete')
                   }}</span>
                 </UButton>
@@ -2764,30 +3059,36 @@ onUnmounted(() => {
                 />
               </div>
             </div>
-          </div>
+          </transition>
         </div>
+      </div>
 
-        <UModal v-model:open="isEditModalOpen">
-          <template #content>
-            <div class="p-6 space-y-6">
-              <div class="space-y-1">
-                <h2
-                  class="text-lg font-semibold text-neutral-800 dark:text-neutral-100"
-                >
-                  {{ $t('dashboard.photos.editModal.title') }}
-                </h2>
-                <p class="text-sm text-neutral-500 dark:text-neutral-400">
-                  {{ $t('dashboard.photos.editModal.description') }}
-                </p>
-                <p
-                  v-if="editingPhoto"
-                  class="text-xs text-neutral-500 dark:text-neutral-500"
-                >
+      <USlideover
+          v-model:open="isEditModalOpen"
+          :title="$t('dashboard.photos.editModal.title')"
+          :description="$t('dashboard.photos.editModal.description')"
+          :ui="{
+            content: 'sm:max-w-xl',
+            body: 'p-2',
+            header:
+              'px-6 py-5 border-b border-neutral-200 dark:border-neutral-800',
+            footer:
+              'px-6 py-5 border-t border-neutral-200 dark:border-neutral-800',
+          }"
+        >
+          <template #body>
+            <div class="space-y-6">
+              <div
+                v-if="editingPhoto"
+                class="space-y-1"
+              >
+                <p class="text-xs text-neutral-500 dark:text-neutral-500">
                   {{ editingPhoto.title || editingPhoto.id }}
                 </p>
               </div>
 
               <UForm
+                id="edit-photo-form"
                 :state="editFormState"
                 class="space-y-5"
                 @submit="handleEditSubmit"
@@ -2926,30 +3227,31 @@ onUnmounted(() => {
                   </div>
 
                 </div>
-
-                <div
-                  class="flex items-center justify-end gap-2 pt-4 border-t border-neutral-200 dark:border-neutral-800"
-                >
-                  <UButton
-                    variant="ghost"
-                    color="neutral"
-                    @click.prevent="isEditModalOpen = false"
-                  >
-                    {{ $t('dashboard.photos.editModal.actions.cancel') }}
-                  </UButton>
-                  <UButton
-                    type="submit"
-                    :loading="isSavingMetadata"
-                    :disabled="!isMetadataDirty || isSavingMetadata"
-                    icon="tabler:device-floppy"
-                  >
-                    {{ $t('dashboard.photos.editModal.actions.save') }}
-                  </UButton>
-                </div>
               </UForm>
             </div>
           </template>
-        </UModal>
+
+          <template #footer>
+            <div class="flex items-center justify-end gap-2 w-full">
+              <UButton
+                variant="ghost"
+                color="neutral"
+                @click.prevent="isEditModalOpen = false"
+              >
+                {{ $t('dashboard.photos.editModal.actions.cancel') }}
+              </UButton>
+              <UButton
+                type="submit"
+                form="edit-photo-form"
+                :loading="isSavingMetadata"
+                :disabled="!isMetadataDirty || isSavingMetadata"
+                icon="tabler:device-floppy"
+              >
+                {{ $t('dashboard.photos.editModal.actions.save') }}
+              </UButton>
+            </div>
+          </template>
+        </USlideover>
 
         <UModal v-model:open="isBatchTagsModalOpen">
           <template #content>
@@ -3116,22 +3418,30 @@ onUnmounted(() => {
         </UModal>
 
         <UModal v-model:open="isDeleteConfirmOpen">
-          <template #content>
-            <div class="p-6 space-y-4">
-              <div class="flex items-start gap-3">
-                <Icon
-                  name="tabler:trash"
-                  class="mt-1 size-6 shrink-0 text-error-500"
-                />
-                <div class="space-y-2">
-                  <h3 class="text-lg font-semibold">
+          <template #body>
+            <div class="space-y-4">
+              <div class="flex items-start gap-4">
+                <div
+                  class="flex size-10 items-center justify-center rounded-full bg-error-100 dark:bg-error-900/40 text-error-600 dark:text-error-400 shrink-0"
+                >
+                  <Icon
+                    name="tabler:trash"
+                    class="size-6"
+                  />
+                </div>
+                <div class="space-y-1.5 pt-1">
+                  <h3
+                    class="text-lg font-semibold text-neutral-900 dark:text-white leading-5"
+                  >
                     {{
                       deleteMode === 'single'
                         ? $t('dashboard.photos.delete.single.title')
                         : $t('dashboard.photos.delete.batch.title')
                     }}
                   </h3>
-                  <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                  <p
+                    class="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed"
+                  >
                     {{
                       deleteMode === 'single'
                         ? $t('dashboard.photos.delete.single.message')
@@ -3140,29 +3450,41 @@ onUnmounted(() => {
                           })
                     }}
                   </p>
-                  <p class="text-sm text-error-500 dark:text-error-400">
-                    {{ $t('dashboard.photos.delete.warning') }}
-                  </p>
+                  <div
+                    class="mt-4 p-3 bg-error-50 dark:bg-error-500/10 border border-error-200/50 dark:border-error-500/20 rounded-lg"
+                  >
+                    <p
+                      class="text-sm font-medium text-error-600 dark:text-error-400 flex items-center gap-2"
+                    >
+                      <Icon
+                        name="tabler:alert-triangle-filled"
+                        class="size-4"
+                      />
+                      {{ $t('dashboard.photos.delete.warning') }}
+                    </p>
+                  </div>
                 </div>
               </div>
-              <div class="flex justify-end gap-2">
-                <UButton
-                  variant="ghost"
-                  color="neutral"
-                  :disabled="isDeleting"
-                  @click="isDeleteConfirmOpen = false"
-                >
-                  {{ $t('dashboard.photos.delete.buttons.cancel') }}
-                </UButton>
-                <UButton
-                  color="error"
-                  icon="tabler:trash"
-                  :loading="isDeleting"
-                  @click="confirmDelete"
-                >
-                  {{ $t('dashboard.photos.delete.buttons.confirm') }}
-                </UButton>
-              </div>
+            </div>
+          </template>
+          <template #footer>
+            <div class="flex justify-end gap-3 w-full">
+              <UButton
+                variant="ghost"
+                color="neutral"
+                :disabled="isDeleting"
+                @click="isDeleteConfirmOpen = false"
+              >
+                {{ $t('dashboard.photos.delete.buttons.cancel') }}
+              </UButton>
+              <UButton
+                color="error"
+                icon="tabler:trash"
+                :loading="isDeleting"
+                @click="confirmDelete"
+              >
+                {{ $t('dashboard.photos.delete.buttons.confirm') }}
+              </UButton>
             </div>
           </template>
         </UModal>
