@@ -55,6 +55,7 @@ const {
 } = usePhotoFilters()
 
 const isSelectorFilterOpen = ref(false)
+const photoSelectorSearchQuery = ref('')
 
 const totalSelectedFilters = computed(() => {
   return Object.values(selectedCounts.value).reduce(
@@ -288,20 +289,28 @@ const setDraftCoverPhoto = (photoId: string) => {
   draftCoverPhotoId.value = photoId
 }
 
-const filteredPhotos = computed(() => {
-  const query = photoSelectorSearchQuery.value.toLowerCase()
-  if (!query) return allPhotos.value
+const selectorFilteredPhotos = computed(() => {
+  const query = photoSelectorSearchQuery.value.trim().toLowerCase()
+  if (!query) return unifiedFilteredPhotos.value
 
-  return allPhotos.value.filter(
-    (photo) =>
-      (photo.title?.toLowerCase() || '').includes(query) ||
-      (photo.description?.toLowerCase() || '').includes(query) ||
-      (photo.tags || []).includes(query),
-  )
+  return unifiedFilteredPhotos.value.filter((photo) => {
+    const searchableText = [
+      photo.title || '',
+      photo.description || '',
+      photo.storageKey || '',
+      photo.city || '',
+      photo.locationName || '',
+      ...(photo.tags || []),
+    ]
+      .join(' ')
+      .toLowerCase()
+
+    return searchableText.includes(query)
+  })
 })
 
 const filteredPhotoIds = computed(() =>
-  filteredPhotos.value.map((photo) => photo.id),
+  selectorFilteredPhotos.value.map((photo) => photo.id),
 )
 
 const getDraftPhotoOrder = (photoId: string) => {
@@ -311,36 +320,62 @@ const getDraftPhotoOrder = (photoId: string) => {
 
 const areAllFilteredPhotosSelected = computed(() => {
   return (
+    filteredPhotoIds.value.length > 0 &&
+    filteredPhotoIds.value.every((photoId) =>
+      draftSelectedPhotoIds.value.includes(photoId),
+    )
+  )
+})
+
+const areSomeFilteredPhotosSelected = computed(() => {
+  const selectedFilteredCount = filteredPhotoIds.value.filter((photoId) =>
+    draftSelectedPhotoIds.value.includes(photoId),
+  ).length
+
+  return (
+    selectedFilteredCount > 0 &&
+    selectedFilteredCount < filteredPhotoIds.value.length
+  )
+})
+
+const areAllPhotosSelected = computed(() => {
+  return (
     allPhotos.value.length > 0 &&
-    selectedPhotoIds.value.length === allPhotos.value.length
+    draftSelectedPhotoIds.value.length === allPhotos.value.length
   )
 })
 
 const areSomePhotosSelected = computed(() => {
   return (
-    selectedPhotoIds.value.length > 0 &&
-    selectedPhotoIds.value.length < allPhotos.value.length
+    draftSelectedPhotoIds.value.length > 0 &&
+    draftSelectedPhotoIds.value.length < allPhotos.value.length
   )
 })
+
+const toggleAllFilteredPhotos = () => {
+  if (areAllFilteredPhotosSelected.value) {
+    draftSelectedPhotoIds.value = draftSelectedPhotoIds.value.filter(
+      (photoId) => !filteredPhotoIds.value.includes(photoId),
+    )
+    if (!draftSelectedPhotoIds.value.includes(draftCoverPhotoId.value)) {
+      draftCoverPhotoId.value = ''
+    }
+    return
+  }
+
+  const nextSelectedPhotoIds = new Set(draftSelectedPhotoIds.value)
+  filteredPhotoIds.value.forEach((photoId) => nextSelectedPhotoIds.add(photoId))
+  draftSelectedPhotoIds.value = Array.from(nextSelectedPhotoIds)
+}
 
 const toggleAllPhotos = () => {
   if (areAllPhotosSelected.value) {
-    selectedPhotoIds.value = []
+    draftSelectedPhotoIds.value = []
+    draftCoverPhotoId.value = ''
   } else {
-    selectedPhotoIds.value = allPhotos.value.map((p) => p.id)
+    draftSelectedPhotoIds.value = allPhotos.value.map((photo) => photo.id)
   }
 }
-
-const filteredPhotos = computed(() => {
-  const query = photoSelectorSearchQuery.value.toLowerCase()
-  if (!query) return allPhotos.value
-
-  return allPhotos.value.filter(
-    (photo) =>
-      (photo.title?.toLowerCase() || '').includes(query) ||
-      (photo.description?.toLowerCase() || '').includes(query),
-  )
-})
 
 onMounted(async () => {
   await Promise.all([loadPhotos(), loadAlbums()])
@@ -948,11 +983,12 @@ const columns: any[] = [
                 >
                   {{
                     $t('dashboard.albums.modal.searchResults', {
-                      current: filteredPhotos.length,
-                      total: allPhotos.length,
+                      current: selectorFilteredPhotos.length,
+                      total: unifiedFilteredPhotos.length,
                     })
                   }}
                 </div>
+              </div>
               </div>
 
               <div class="flex-1 overflow-y-auto p-3 sm:p-5">

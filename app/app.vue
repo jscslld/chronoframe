@@ -33,34 +33,36 @@ useHead({
     `${title ? title + ' | ' : ''}${appTitle.value || 'ChronoFrame'}`,
 })
 
-// 获取 query 中的 albumId
-const albumId = computed(() => router.currentRoute.value.query.albumId as string | undefined)
-// 根据用户登录状态和当前路由决定使用哪个 API
-// 登录用户或后台管理页面显示所有照片，未登录用户在前端页面只显示可见照片
 const route = useRoute()
 const { loggedIn } = useUserSession()
-const apiEndpoint = computed(() => {
-  // 后台管理页面始终显示所有照片
-  if (route.path.startsWith('/dashboard')) {
-    return '/api/photos'
-  }
-  // 前端页面：登录用户显示所有照片，未登录用户只显示可见照片
-  return loggedIn.value ? '/api/photos' : '/api/photos/visible'
-})
-const { data, refresh, status } = await useFetch(() => apiEndpoint.value, {
-  watch: [apiEndpoint],
+
+const albumId = computed(() => {
+  const value = route.query.albumId
+  return Array.isArray(value) ? value[0] : value
 })
 
-const photos = computed(() => (data.value as Photo[]) || [])
-
-// 构建 fetch URL
 const fetchUrl = computed(() => {
-  return albumId.value ? `/api/photos?albumId=${albumId.value}` : '/api/photos'
+  // 后台管理页始终显示全部
+  // 前端页面：登录用户显示全部，未登录用户只显示可见照片
+  const base =
+    route.path.startsWith('/dashboard') || loggedIn.value
+      ? '/api/photos'
+      : '/api/photos/visible'
+
+  if (!albumId.value) return base
+
+  const params = new URLSearchParams({
+    albumId: albumId.value,
+  })
+
+  return `${base}?${params.toString()}`
 })
 
-const { data, refresh, status } = useFetch<Photo[]>(fetchUrl)
+const { data, refresh, status } = await useFetch<Photo[]>(() => fetchUrl.value, {
+  watch: [fetchUrl],
+})
 
-const photos = computed(() => data.value || [])
+const photos = computed(() => data.value ?? [])
 const { switchToIndex, closeViewer, clearReturnRoute } = useViewerState()
 const { currentPhotoIndex, isViewerOpen, returnRoute, isDirectAccess } =
   storeToRefs(useViewerState())
