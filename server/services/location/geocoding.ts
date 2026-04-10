@@ -1,3 +1,5 @@
+import { sql } from 'drizzle-orm'
+import { tables, useDB } from '../../utils/db'
 import { withRetry, RetryPresets } from '../../utils/retry'
 import { settingsManager } from '../settings/settingsManager'
 
@@ -11,6 +13,50 @@ export interface LocationInfo {
 
 export interface GeocodingProvider {
   reverseGeocode(lat: number, lon: number): Promise<LocationInfo | null>
+}
+
+const LOCATION_CACHE_EPSILON = 0.000001
+
+async function findCachedLocationByCoordinates(
+  latitude: number,
+  longitude: number,
+): Promise<LocationInfo | null> {
+  const db = useDB()
+
+  const cachedPhoto = await db
+    .select({
+      latitude: tables.photos.latitude,
+      longitude: tables.photos.longitude,
+      country: tables.photos.country,
+      city: tables.photos.city,
+      locationName: tables.photos.locationName,
+    })
+    .from(tables.photos)
+    .where(sql`
+      ${tables.photos.latitude} is not null
+      and ${tables.photos.longitude} is not null
+      and abs(${tables.photos.latitude} - ${latitude}) < ${LOCATION_CACHE_EPSILON}
+      and abs(${tables.photos.longitude} - ${longitude}) < ${LOCATION_CACHE_EPSILON}
+      and (
+        ${tables.photos.country} is not null
+        or ${tables.photos.city} is not null
+        or ${tables.photos.locationName} is not null
+      )
+    `)
+    .limit(1)
+    .get()
+
+  if (!cachedPhoto) {
+    return null
+  }
+
+  return {
+    latitude,
+    longitude,
+    country: cachedPhoto.country ?? undefined,
+    city: cachedPhoto.city ?? undefined,
+    locationName: cachedPhoto.locationName ?? undefined,
+  }
 }
 
 /**
@@ -261,6 +307,17 @@ export async function extractLocationFromGPS(
   logger.location.info(
     `Reverse geocoding coordinates: ${gpsLatitude}, ${gpsLongitude}`,
   )
+
+  const cachedLocation = await findCachedLocationByCoordinates(
+    gpsLatitude,
+    gpsLongitude,
+  )
+  if (cachedLocation) {
+    logger.location.info(
+      `Using cached reverse geocoding result for ${gpsLatitude}, ${gpsLongitude}`,
+    )
+    return cachedLocation
+  }
 
   // 如果没有指定提供者，使用默认提供者
   const geocodingProvider = provider || (await createGeocodingProvider())

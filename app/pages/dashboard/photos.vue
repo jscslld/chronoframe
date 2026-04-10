@@ -3016,50 +3016,52 @@ onUnmounted(() => {
                 </UButton>
               </div>
             </div>
-
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div class="text-xs text-neutral-500 dark:text-neutral-400">
-                {{
-                  $t('dashboard.photos.pagination.summary', {
-                    start: paginationStart,
-                    end: paginationEnd,
-                    total: totalRowsCount,
-                  })
-                }}
-              </div>
-
-              <div class="flex items-center gap-2">
-                <USelectMenu
-                  v-model="pageSize"
-                  :items="[20, 50, 100, 200]"
-                  size="xs"
-                  class="w-24"
-                />
-
-                <UButton
-                  variant="soft"
-                  color="neutral"
-                  size="xs"
-                  icon="tabler:chevron-left"
-                  :disabled="!canGoPrevPage"
-                  @click="goPrevPage"
-                />
-
-                <span class="text-xs text-neutral-500 dark:text-neutral-400 min-w-[72px] text-center">
-                  {{ currentPage }} / {{ totalPages }}
-                </span>
-
-                <UButton
-                  variant="soft"
-                  color="neutral"
-                  size="xs"
-                  icon="tabler:chevron-right"
-                  :disabled="!canGoNextPage"
-                  @click="goNextPage"
-                />
-              </div>
-            </div>
           </transition>
+
+          <div
+            class="flex flex-col gap-2 border-t border-neutral-200/80 bg-white px-4 py-3 dark:border-neutral-800/80 dark:bg-neutral-900 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="text-xs text-neutral-500 dark:text-neutral-400">
+              {{
+                $t('dashboard.photos.pagination.summary', {
+                  start: paginationStart,
+                  end: paginationEnd,
+                  total: totalRowsCount,
+                })
+              }}
+            </div>
+
+            <div class="flex items-center gap-2">
+              <USelectMenu
+                v-model="pageSize"
+                :items="[20, 50, 100, 200]"
+                size="xs"
+                class="w-24"
+              />
+
+              <UButton
+                variant="soft"
+                color="neutral"
+                size="xs"
+                icon="tabler:chevron-left"
+                :disabled="!canGoPrevPage"
+                @click="goPrevPage"
+              />
+
+              <span class="min-w-[72px] text-center text-xs text-neutral-500 dark:text-neutral-400">
+                {{ currentPage }} / {{ totalPages }}
+              </span>
+
+              <UButton
+                variant="soft"
+                color="neutral"
+                size="xs"
+                icon="tabler:chevron-right"
+                :disabled="!canGoNextPage"
+                @click="goNextPage"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
