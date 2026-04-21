@@ -19,6 +19,9 @@ export default defineNitroPlugin(async (_nitroApp) => {
     // Migrate existing configurations from runtimeConfig
     // Note: Storage manager will be initialized in the next plugin (2_storage.ts)
     await migrateRuntimeConfigToSettings()
+
+    // Sync GitHub OAuth credentials from settings to process.env for auth-utils.
+    await syncGithubOAuthEnvFromSettings()
   } finally {
     _settingsManager.setInitializingFlag(false)
   }
@@ -28,7 +31,7 @@ export default defineNitroPlugin(async (_nitroApp) => {
  * Migrate existing configurations from runtimeConfig to the settings system
  */
 async function migrateRuntimeConfigToSettings() {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig() as any
   const _logger = logger.dynamic('settings-migration')
 
   try {
@@ -77,6 +80,39 @@ async function migrateRuntimeConfigToSettings() {
       }
     }
 
+    // Migrate auth settings (GitHub OAuth)
+    const githubOauthConfig = config.oauth?.github || {}
+    if (config.public?.oauth?.github?.enabled === true) {
+      try {
+        await settingsManager.set(
+          'system',
+          'auth.github.enabled' as any,
+          true,
+          undefined,
+          true,
+        )
+        _logger.debug('Migrated system.auth.github.enabled=true')
+      } catch (error) {
+        _logger.warn('Failed to migrate system.auth.github.enabled:', error)
+      }
+    }
+
+    const githubOauthSettings = {
+      'auth.github.clientId': githubOauthConfig.clientId || '',
+      'auth.github.clientSecret': githubOauthConfig.clientSecret || '',
+    }
+
+    for (const [key, value] of Object.entries(githubOauthSettings)) {
+      if (typeof value === 'string' && value.length > 0) {
+        try {
+          await settingsManager.set('system', key as any, value, undefined, true)
+          _logger.debug(`Migrated system.${key}`)
+        } catch (error) {
+          _logger.warn(`Failed to migrate system.${key}:`, error)
+        }
+      }
+    }
+
     // Migrate storage configuration and set as active provider
     if (config.STORAGE_PROVIDER || config.provider) {
       _logger.info('Migrating storage configuration')
@@ -86,41 +122,52 @@ async function migrateRuntimeConfigToSettings() {
         config.provider?.[storageProvider as keyof typeof config.provider]
 
       if (providerConfig) {
-        try {
-          // Check if a provider of the same type already exists
-          const existingProviders = await settingsManager.storage.getProviders()
-          const sameTypeProviderExists = existingProviders.some(
-            (provider) => provider.provider === storageProvider,
+        const normalizedConfig = normalizeProviderConfig(
+          storageProvider,
+          providerConfig,
+        )
+
+        if (!isRuntimeProviderConfigUsable(normalizedConfig)) {
+          _logger.info(
+            `Skipping storage migration for ${storageProvider}: runtime config is incomplete`,
           )
-
-          if (sameTypeProviderExists) {
-            _logger.info(
-              `Storage provider of type ${storageProvider} already exists, skipping creation`,
+        } else {
+          try {
+            // Check if a provider of the same type already exists
+            const existingProviders = await settingsManager.storage.getProviders()
+            const sameTypeProviderExists = existingProviders.some(
+              (provider) => provider.provider === storageProvider,
             )
-          } else {
-            // Create a storage provider from the current configuration
-            const providerName = `Migrated ${storageProvider} Provider`
 
-            const providerId = await settingsManager.storage.addProvider({
-              name: providerName,
-              provider: storageProvider as 's3' | 'local' | 'openlist',
-              config: normalizeProviderConfig(storageProvider, providerConfig),
-            })
+            if (sameTypeProviderExists) {
+              _logger.info(
+                `Storage provider of type ${storageProvider} already exists, skipping creation`,
+              )
+            } else {
+              // Create a storage provider from the current configuration
+              const providerName = `Migrated ${storageProvider} Provider`
 
-            // Set this as the active provider
-            await settingsManager.set(
-              'storage',
-              'provider',
-              providerId,
-              undefined,
-              true,
-            )
-            _logger.info(
-              `Storage provider migrated and set as active. Provider ID: ${providerId}`,
-            )
+              const providerId = await settingsManager.storage.addProvider({
+                name: providerName,
+                provider: storageProvider as 's3' | 'local' | 'openlist',
+                config: normalizedConfig,
+              })
+
+              // Set this as the active provider
+              await settingsManager.set(
+                'storage',
+                'provider',
+                providerId,
+                undefined,
+                true,
+              )
+              _logger.info(
+                `Storage provider migrated and set as active. Provider ID: ${providerId}`,
+              )
+            }
+          } catch (error) {
+            _logger.error('Failed to migrate storage provider:', error)
           }
-        } catch (error) {
-          _logger.error('Failed to migrate storage provider:', error)
         }
       }
     }
@@ -128,6 +175,36 @@ async function migrateRuntimeConfigToSettings() {
     _logger.info('Configuration migration completed')
   } catch (error) {
     _logger.error('Failed to migrate configurations:', error)
+  }
+}
+
+async function syncGithubOAuthEnvFromSettings() {
+  const config = useRuntimeConfig() as any
+
+  const enabled = await settingsManager.get<boolean>(
+    'system',
+    'auth.github.enabled' as any,
+    Boolean(config.public?.oauth?.github?.enabled),
+  )
+  const clientId = await settingsManager.get<string>(
+    'system',
+    'auth.github.clientId' as any,
+    config.oauth?.github?.clientId || '',
+  )
+  const clientSecret = await settingsManager.get<string>(
+    'system',
+    'auth.github.clientSecret' as any,
+    config.oauth?.github?.clientSecret || '',
+  )
+
+  const canEnableGithubOauth = Boolean(enabled && clientId && clientSecret)
+
+  if (canEnableGithubOauth) {
+    process.env.NUXT_OAUTH_GITHUB_CLIENT_ID = clientId || ''
+    process.env.NUXT_OAUTH_GITHUB_CLIENT_SECRET = clientSecret || ''
+  } else {
+    delete process.env.NUXT_OAUTH_GITHUB_CLIENT_ID
+    delete process.env.NUXT_OAUTH_GITHUB_CLIENT_SECRET
   }
 }
 
@@ -192,5 +269,27 @@ function normalizeProviderConfig(provider: string, config: any): any {
 
     default:
       return config
+  }
+}
+
+function isRuntimeProviderConfigUsable(config: any): boolean {
+  if (!config || !config.provider) {
+    return false
+  }
+
+  switch (config.provider) {
+    case 's3':
+      return Boolean(
+        config.endpoint &&
+          config.bucket &&
+          config.accessKeyId &&
+          config.secretAccessKey,
+      )
+    case 'local':
+      return Boolean(config.basePath)
+    case 'openlist':
+      return Boolean(config.baseUrl && config.rootPath && config.token)
+    default:
+      return false
   }
 }
