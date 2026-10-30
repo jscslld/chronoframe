@@ -1,6 +1,9 @@
 name: Publish Images
 
 on:
+  push:
+    tags:
+      - 'docker-v*'
   workflow_dispatch:
     inputs:
       version:
@@ -31,8 +34,11 @@ jobs:
 
       - name: Extract version
         id: version
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${MANUAL_VERSION:-${GITHUB_REF_NAME#docker-v}}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { echo "Invalid version"; exit 1; }
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [[ "$VERSION" == *"-"* ]]; then
             echo "prerelease=true" >> $GITHUB_OUTPUT
