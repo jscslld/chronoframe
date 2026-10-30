@@ -1,0 +1,23 @@
+{
+  "name": "@chronoframe/platform",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./domains": "./src/domains.ts",
+    "./entitlements": "./src/entitlements.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chronoframe/contracts": "workspace:*",
+    "@chronoframe/core": "workspace:*",
+    "dodopayments": "2.59.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

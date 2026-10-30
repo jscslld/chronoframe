@@ -5,7 +5,7 @@ layout: home
 hero:
   name: 'ChronoFrame'
   text: 'Self-hosted Personal Gallery'
-  tagline: 'Manage photos online with multi-storage backends, LivePhoto, and globe view'
+  tagline: 'A home for your everyday moments and travels.'
   image:
     src: /logo.png
     alt: ChronoFrame
@@ -18,42 +18,40 @@ hero:
       text: View on GitHub
       link: https://github.com/HoshinoSuzumi/chronoframe
     - theme: alt
-      text: View Demo
-      link: https://lens.bh8.ga
+      text: Demo Sites
+      link: /demo-sites
 
 features:
-  - title: Powerful Photo Management
+  - title: Photo Management
     icon: 🖼️
-    details: Easily manage and browse photos through web interface, view photo locations on map.
+    details: Upload in batches, edit photo details, and find photos with filters and sorting.
   - title: Simple Deployment
     icon: 🚀
-    details: Deploy with one command using Docker, no database required (based on SQLite3).
-  - title: Flexible Storage Solutions
+    details: Start with Docker and follow the setup wizard. No separate database installation is needed.
+  - title: Storage Options
     icon: 💾
-    details: Support multiple storage backends including S3-compatible storage and local filesystem.
-  - title: Smart Geolocation
+    details: Use local files, S3-compatible storage or OpenList, with storage schemes managed in the dashboard.
+  - title: Maps and Places
     icon: 🌍
-    details: Automatically extract photo GPS information, use Mapbox for geocoding, display photo locations on map.
-  - title: Responsive Design
-    icon: 📱
-    details: Perfect for desktop and mobile, support touch operations and gesture controls, native app-like experience.
-  - title: Live/Motion Photo Support
+    details: Identify shooting locations from photo GPS and revisit the places you have been on a map.
+  - title: Albums and Privacy
+    icon: 🔒
+    details: Group photos into albums, arrange their order, and hide albums or protect them with a password.
+  - title: Live and Motion Photos
     icon: 🎬
-    details: Full support for Apple LivePhoto format and Google-standard Motion Photo, automatically detect and process MOV video files, preserve dynamic photo effects.
+    details: Play the motion captured in Apple Live Photos and Motion Photos while browsing your gallery.
 ---
 
 ## 🌍 Demo Sites
 
-Here are some well-running ChronoFrame instances built by developers and community members:
-
-- [**TimoYin's Mems**](https://lens.bh8.ga)
+Browse galleries shared by developers and community members on the [Demo Sites page](/demo-sites).
 
 ## 💬 Community Support
 
-- **GitHub Issues**: [Report Issues](https://github.com/HoshinoSuzumi/chronoframe/issues)
+- **GitHub Issues**: [Report Issues](https://github.com/HoshinoSuzumi/chronoframe/issues/new/choose)
 - **GitHub Discussions**: [Discussions](https://github.com/HoshinoSuzumi/chronoframe/discussions)
 - **Discord**: [Join Us](https://discord.gg/MM4ZK4Ed7s)
 
 ## 📄 License
 
-ChronoFrame is open source under the [MIT License](https://github.com/HoshinoSuzumi/chronoframe/blob/main/LICENSE), welcome to use and contribute freely.
+ChronoFrame uses [AGPL-3.0-only](https://github.com/HoshinoSuzumi/chronoframe/blob/main/LICENSE) by default. The contracts and webgl-image packages remain MIT. See the [licensing guide](https://github.com/HoshinoSuzumi/chronoframe/blob/main/LICENSING.md) for scope, historical MIT rights, and commercial licensing by ChronoFrame.

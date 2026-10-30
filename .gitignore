@@ -33,3 +33,11 @@ logs
 # VitePress outputs
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# Temporary files
+.tmp
+
+# Local Cloudflare Workers state and generated deployment pointers
+.wrangler
+.dev.vars
+.dev.vars.*

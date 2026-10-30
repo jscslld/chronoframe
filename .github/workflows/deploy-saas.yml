@@ -1,0 +1,339 @@
+name: Deploy SaaS Workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Source branch to deploy
+        type: string
+        required: true
+      environment:
+        description: Deployment environment
+        type: choice
+        options: [staging, production]
+        default: staging
+        required: true
+      deploy_cloud:
+        description: Deploy the cloud portal
+        type: boolean
+        default: true
+      deploy_site:
+        description: Deploy the public site entry
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: saas-workers-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.plan.outputs.commit }}
+      entries: ${{ steps.plan.outputs.entries }}
+    steps:
+      - name: Checkout requested source branch
+        uses: actions/checkout@v7
+        with:
+          ref: refs/heads/${{ inputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and summarize deployment
+        id: plan
+        env:
+          SOURCE_BRANCH: ${{ inputs.branch }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOY_CLOUD: ${{ inputs.deploy_cloud }}
+          DEPLOY_SITE: ${{ inputs.deploy_site }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git check-ref-format "refs/heads/$SOURCE_BRANCH"
+          case "$DEPLOY_ENVIRONMENT" in staging|production) ;; *) exit 1 ;; esac
+          entries=()
+          [[ "$DEPLOY_CLOUD" == true ]] && entries+=(cloud)
+          [[ "$DEPLOY_SITE" == true ]] && entries+=(site)
+          if (( ${#entries[@]} == 0 )); then
+            echo "::error::Select at least one application."
+            exit 1
+          fi
+          # Referencing a missing environment would silently create an unprotected one.
+          # Refuse to proceed unless an explicit reviewer gate is already configured.
+          gh api "repos/$GITHUB_REPOSITORY/environments/saas-$DEPLOY_ENVIRONMENT" > "$RUNNER_TEMP/environment.json"
+          jq -e 'any(.protection_rules[]?; .type == "required_reviewers" and (.reviewers | length > 0))' "$RUNNER_TEMP/environment.json" > /dev/null
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "entries=${entries[*]}" >> "$GITHUB_OUTPUT"
+          {
+            echo '## SaaS deployment awaiting approval'
+            echo ""
+            echo "- Source branch: \`$SOURCE_BRANCH\`"
+            echo "- Commit: [$commit]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$commit)"
+            echo "- Approval environment: \`saas-$DEPLOY_ENVIRONMENT\`"
+            echo "- Deployment identifier: \`${commit:0:12}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
+            echo '- Build and deployment start only after approval; the source SHA remains fixed.'
+            if [[ "$DEPLOY_ENVIRONMENT" == staging ]]; then
+              echo '- Target: isolated Preview named `staging`; production deployment is unchanged.'
+              echo '- Preview variables/secrets/bindings must use test resources; production settings are not inherited.'
+            else
+              echo '- Target: production deployment; existing staging Previews are not replaced.'
+            fi
+            echo '- Existing service routes are retained. Enabled domain automation may provision certificates and exact customer routes within the configured limit. No Git release tags or Docker publication.'
+            echo '- Default-address migration uses the configured Site base domain. Verify DNS/TLS and reserved service routes before enabling it.'
+            echo '- Platform D1 binding is read from the selected GitHub Environment after approval; staging and production require separate databases.'
+            echo '- Pending platform D1 migrations run after approval and successful builds, before Worker publication. Applied migrations remain if publication later fails.'
+            echo '- Email sign-in additionally requires explicitly configured runtime mail credentials and a portal origin.'
+            echo ""
+            echo '### Targets'
+            for entry in "${entries[@]}"; do
+              if [[ "$DEPLOY_ENVIRONMENT" == staging ]]; then
+                echo "- \`$entry\` → \`chronoframe-$entry\`, Preview \`staging\` (workers.dev)"
+              else
+                echo "- \`$entry\` → \`chronoframe-$entry\` (workers.dev)"
+              fi
+            done
+            echo ""
+            echo '### Latest source changes'
+            echo '```text'
+            git log -10 --format='%h %s' | tr -d '\r'
+            echo '```'
+            echo 'This is source history, not a comparison with the currently deployed Worker.'
+            echo ""
+            echo 'Both Workers deploy sequentially. A failure can leave a partial deployment; inspect the results before retrying.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: saas-${{ inputs.environment }}
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+      PLATFORM_SITE_BASE_DOMAIN: ${{ vars.PLATFORM_SITE_BASE_DOMAIN }}
+      PLATFORM_DEFAULT_DOMAINS_READY: ${{ vars.PLATFORM_DEFAULT_DOMAINS_READY }}
+      PLATFORM_DOMAIN_ENABLED: ${{ vars.PLATFORM_DOMAIN_ENABLED }}
+      PLATFORM_DOMAIN_ROUTING_READY: ${{ vars.PLATFORM_DOMAIN_ROUTING_READY }}
+      PLATFORM_DOMAIN_ZONE_ID: ${{ vars.PLATFORM_DOMAIN_ZONE_ID }}
+      PLATFORM_DOMAIN_CNAME_TARGET: ${{ vars.PLATFORM_DOMAIN_CNAME_TARGET }}
+      PLATFORM_DOMAIN_SITE_WORKER: ${{ vars.PLATFORM_DOMAIN_SITE_WORKER }}
+      PLATFORM_DOMAIN_RESOURCE_LIMIT: ${{ vars.PLATFORM_DOMAIN_RESOURCE_LIMIT }}
+      PLATFORM_DOMAIN_PROVIDER_TOKEN: ${{ secrets.PLATFORM_DOMAIN_PROVIDER_TOKEN }}
+    steps:
+      - name: Checkout approved immutable source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.3
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:entries
+      - run: pnpm build:deps
+      - name: Validate platform runtime configuration
+        env:
+          ENTRIES: ${{ needs.plan.outputs.entries }}
+          PLATFORM_D1_DATABASE_ID: ${{ vars.PLATFORM_D1_DATABASE_ID }}
+          PLATFORM_PORTAL_ORIGIN: ${{ vars.PLATFORM_PORTAL_ORIGIN }}
+          PLATFORM_EMAIL_FROM: ${{ vars.PLATFORM_EMAIL_FROM }}
+          CLOUD_PLATFORM_SECRET: ${{ secrets.CLOUD_PLATFORM_SECRET }}
+          SITE_PLATFORM_SECRET: ${{ secrets.SITE_PLATFORM_SECRET }}
+          PLATFORM_STORAGE_SECRET: ${{ secrets.PLATFORM_STORAGE_SECRET }}
+          PLATFORM_WORKER_SECRET: ${{ secrets.PLATFORM_WORKER_SECRET }}
+          PLATFORM_S3_ENDPOINT_HOSTS: ${{ vars.PLATFORM_S3_ENDPOINT_HOSTS }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { domainDeploymentValues } from './scripts/domain-deployment.mjs'
+          domainDeploymentValues(process.env.DEPLOY_ENVIRONMENT,process.env)
+          if (process.env.PLATFORM_D1_DATABASE_ID) {
+            if ((process.env.PLATFORM_STORAGE_SECRET || '').length < 32) throw new Error('Configure PLATFORM_STORAGE_SECRET with at least 32 characters in the selected GitHub Environment secrets')
+            if (process.env.ENTRIES.split(/\s+/).includes('cloud') && (process.env.PLATFORM_WORKER_SECRET || '').length < 32) throw new Error('Configure PLATFORM_WORKER_SECRET with at least 32 characters in the selected GitHub Environment secrets')
+            for (const host of (process.env.PLATFORM_S3_ENDPOINT_HOSTS || '').split(',').filter(Boolean)) {
+              if (!/^[a-z0-9.-]+$/i.test(host.trim())) throw new Error('PLATFORM_S3_ENDPOINT_HOSTS must contain exact hostnames')
+            }
+            for (const entry of process.env.ENTRIES.split(/\s+/).filter(Boolean)) {
+              const key = entry === 'cloud' ? 'CLOUD_PLATFORM_SECRET' : 'SITE_PLATFORM_SECRET'
+              if ((process.env[key] || '').length < 32) throw new Error(`Configure ${key} with at least 32 characters in the selected GitHub Environment secrets`)
+              if (entry === 'cloud') {
+                const origin = process.env.PLATFORM_PORTAL_ORIGIN
+                if (!origin || new URL(origin).protocol !== 'https:' || new URL(origin).origin !== origin) throw new Error('Configure PLATFORM_PORTAL_ORIGIN as an exact HTTPS origin in the selected GitHub Environment variables')
+              }
+            }
+          }
+          NODE
+      - name: Build and verify all selected Workers before deploying any
+        env:
+          ENTRIES: ${{ needs.plan.outputs.entries }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          PLATFORM_D1_DATABASE_ID: ${{ vars.PLATFORM_D1_DATABASE_ID }}
+          PLATFORM_EMAIL_FROM: ${{ vars.PLATFORM_EMAIL_FROM }}
+          PLATFORM_PORTAL_ORIGIN: ${{ vars.PLATFORM_PORTAL_ORIGIN }}
+        run: |
+          set -euo pipefail
+          for entry in $ENTRIES; do
+            pnpm "build:$entry"
+            node scripts/check-entry-boundaries.mjs --built "$entry"
+            pnpm "smoke:$entry"
+            export ENTRY="$entry"
+            node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const path = `apps/${process.env.ENTRY}/.output/server/wrangler.json`
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'))
+          config.name = `chronoframe-${process.env.ENTRY}`
+          config.workers_dev = true
+          // Production deploys retain Dashboard vars; Preview deployments manage vars separately.
+          config.keep_vars = true
+          // Named staging Previews also require workers.dev preview URLs to be enabled.
+          config.preview_urls = true
+          // Do not copy production variables or data bindings into Preview settings.
+          config.previews ??= {}
+          const databaseId = process.env.PLATFORM_D1_DATABASE_ID
+          if (databaseId) {
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(databaseId)) throw new Error('Invalid platform D1 database ID')
+            const binding = { binding: 'DB', database_name: 'chronoframe-saas', database_id: databaseId }
+            if (process.env.DEPLOY_ENVIRONMENT === 'staging') {
+              config.previews.d1_databases = [binding]
+              delete config.d1_databases
+            } else {
+              config.d1_databases = [binding]
+            }
+          }
+          const portalOrigin = process.env.PLATFORM_PORTAL_ORIGIN
+          if (portalOrigin) {
+            const url = new URL(portalOrigin)
+            if (url.protocol !== 'https:' || url.origin !== portalOrigin) throw new Error('Platform portal origin must be an exact HTTPS origin')
+            const target = process.env.DEPLOY_ENVIRONMENT === 'staging' ? config.previews : config
+            target.vars = { ...target.vars, NUXT_PLATFORM_PORTAL_ORIGIN: portalOrigin }
+          }
+          const emailFrom = process.env.PLATFORM_EMAIL_FROM
+          if (process.env.ENTRY === 'cloud') {
+            if (emailFrom && !/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(emailFrom)) throw new Error('Invalid platform email sender address')
+            const target = process.env.DEPLOY_ENVIRONMENT === 'staging' ? config.previews : config
+            target.send_email = [{ name: 'EMAIL', remote: true }]
+            if (emailFrom) target.vars = { ...target.vars, NUXT_PLATFORM_EMAIL_FROM: emailFrom }
+            if (process.env.DEPLOY_ENVIRONMENT === 'staging') delete config.send_email
+          }
+          const { configureDomainDeployment } = await import('./scripts/domain-deployment.mjs')
+          configureDomainDeployment(config,process.env.ENTRY,process.env.DEPLOY_ENVIRONMENT,process.env)
+          delete config.env
+          fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n')
+          NODE
+            pnpm exec wrangler deploy --dry-run --config "apps/$entry/.output/server/wrangler.json" --outdir "$RUNNER_TEMP/worker-$entry"
+          done
+      - name: Apply approved platform D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PLATFORM_D1_DATABASE_ID: ${{ vars.PLATFORM_D1_DATABASE_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$PLATFORM_D1_DATABASE_ID" ]]; then
+            echo '- Platform D1 migration skipped: no database configured.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo '::error::Configure Cloudflare credentials in the selected GitHub Environment.'
+            exit 1
+          fi
+          export PLATFORM_MIGRATION_CONFIG="$RUNNER_TEMP/platform-d1-migrations.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import path from 'node:path'
+          const id = process.env.PLATFORM_D1_DATABASE_ID
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error('Invalid platform D1 database ID')
+          fs.writeFileSync(process.env.PLATFORM_MIGRATION_CONFIG, JSON.stringify({
+            name: 'chronoframe-platform-migrations',
+            compatibility_date: '2026-10-22',
+            d1_databases: [{ binding: 'DB', database_name: 'chronoframe-saas', database_id: id, migrations_dir: path.resolve('packages/platform/migrations') }],
+          }))
+          NODE
+          if pnpm exec wrangler d1 migrations apply DB --remote --config "$PLATFORM_MIGRATION_CONFIG"; then
+            echo '- Platform D1 migrations applied; previously applied files were skipped.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- **Platform D1 migration failed. Workers were not published.**' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Publish approved Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENTRIES: ${{ needs.plan.outputs.entries }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          SOURCE_COMMIT: ${{ needs.plan.outputs.commit }}
+          PLATFORM_PORTAL_ORIGIN: ${{ vars.PLATFORM_PORTAL_ORIGIN }}
+          PLATFORM_EMAIL_FROM: ${{ vars.PLATFORM_EMAIL_FROM }}
+          CLOUD_PLATFORM_SECRET: ${{ secrets.CLOUD_PLATFORM_SECRET }}
+          SITE_PLATFORM_SECRET: ${{ secrets.SITE_PLATFORM_SECRET }}
+          PLATFORM_STORAGE_SECRET: ${{ secrets.PLATFORM_STORAGE_SECRET }}
+          PLATFORM_WORKER_SECRET: ${{ secrets.PLATFORM_WORKER_SECRET }}
+          PLATFORM_S3_ENDPOINT_HOSTS: ${{ vars.PLATFORM_S3_ENDPOINT_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo '::error::Configure CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the selected GitHub Environment.'
+            exit 1
+          fi
+          secret_file="$(mktemp "$RUNNER_TEMP/worker-secrets.XXXXXX")"
+          trap 'rm -f "$secret_file"' EXIT
+          echo '## Worker deployment results' >> "$GITHUB_STEP_SUMMARY"
+          for entry in $ENTRIES; do
+            worker="chronoframe-$entry"
+            command=(deploy)
+            target="$worker (production)"
+            if [[ "$DEPLOY_ENVIRONMENT" == staging ]]; then
+              command=(preview --name staging --worker-name "$worker")
+              target="$worker / Preview staging"
+            fi
+            if [[ -n "$PLATFORM_PORTAL_ORIGIN" ]]; then
+              command+=(--var "NUXT_PLATFORM_PORTAL_ORIGIN:$PLATFORM_PORTAL_ORIGIN")
+            fi
+            if [[ "$entry" == cloud ]]; then
+              if [[ -n "$PLATFORM_EMAIL_FROM" ]]; then
+                command+=(--var "NUXT_PLATFORM_EMAIL_FROM:$PLATFORM_EMAIL_FROM")
+              fi
+            fi
+            export ENTRY="$entry" WORKER_SECRET_FILE="$secret_file"
+            node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const secret = process.env[process.env.ENTRY === 'cloud' ? 'CLOUD_PLATFORM_SECRET' : 'SITE_PLATFORM_SECRET']
+          const values = secret ? { NUXT_PLATFORM_SECRET: secret } : {}
+          if (process.env.PLATFORM_STORAGE_SECRET) values.NUXT_PLATFORM_STORAGE_SECRET = process.env.PLATFORM_STORAGE_SECRET
+          if (process.env.ENTRY === 'cloud' && process.env.PLATFORM_WORKER_SECRET) values.NUXT_PLATFORM_WORKER_SECRET = process.env.PLATFORM_WORKER_SECRET
+          if (process.env.ENTRY === 'cloud' && process.env.PLATFORM_DOMAIN_PROVIDER_TOKEN) values.NUXT_PLATFORM_DOMAIN_PROVIDER_TOKEN = process.env.PLATFORM_DOMAIN_PROVIDER_TOKEN
+          fs.writeFileSync(process.env.WORKER_SECRET_FILE, JSON.stringify(values), { mode: 0o600 })
+          NODE
+            if [[ -n "$PLATFORM_S3_ENDPOINT_HOSTS" ]]; then
+              command+=(--var "NUXT_PLATFORM_S3_ENDPOINT_HOSTS:$PLATFORM_S3_ENDPOINT_HOSTS")
+            fi
+            domain_vars_file="$RUNNER_TEMP/domain-vars-$entry.json"
+            export DOMAIN_VARS_FILE="$domain_vars_file"
+            node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { domainDeploymentValues } from './scripts/domain-deployment.mjs'
+          const values=domainDeploymentValues(process.env.DEPLOY_ENVIRONMENT,process.env)
+          fs.writeFileSync(process.env.DOMAIN_VARS_FILE,JSON.stringify(Object.entries(values).filter(([key])=>process.env.ENTRY==='cloud'||key.startsWith('NUXT_PUBLIC_'))))
+          NODE
+            while IFS= read -r pair; do command+=(--var "$pair"); done < <(jq -r '.[]|.[0]+":"+.[1]' "$domain_vars_file")
+            command+=(--secrets-file "$secret_file")
+            echo "### $target" >> "$GITHUB_STEP_SUMMARY"
+            if pnpm exec wrangler "${command[@]}" --config "apps/$entry/.output/server/wrangler.json" \
+              --message "Source $SOURCE_COMMIT; Actions $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
+              2>&1 | tee "$RUNNER_TEMP/deploy-$entry.log"; then
+              echo "- Successfully deployed approved commit \`$SOURCE_COMMIT\`." >> "$GITHUB_STEP_SUMMARY"
+              sed -nE 's/.*(https:\/\/[a-zA-Z0-9._-]+\.workers\.dev).*/- URL: \1/p' "$RUNNER_TEMP/deploy-$entry.log" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo '- **Deployment failed.** Previously successful targets remain deployed; subsequent targets were not attempted.' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done

@@ -6,6 +6,6 @@
   "bracketSameLine": false,
   "singleAttributePerLine": true,
   "printWidth": 80,
-  "sortPackageJson": false,
-  "ignorePatterns": []
+  "sortPackageJson": true,
+  "ignorePatterns": ["apps/admin/**"]
 }
