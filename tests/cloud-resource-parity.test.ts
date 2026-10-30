@@ -159,6 +159,28 @@ test('Cloud D1 and Self-hosted SQLite share ordering, visibility and protected-a
         (await reader.listVisiblePhotos()).map((p) => p.id),
         ['new', 'old'],
       )
+      assert.deepEqual(
+        (await reader.listVisiblePhotos({ limit: 1, offset: 1 })).map(
+          (p) => p.id,
+        ),
+        ['old'],
+      )
+      assert.deepEqual(
+        (
+          await reader.listVisiblePhotos({
+            limit: 10,
+            offset: 0,
+            before: '2021',
+          })
+        ).map((p) => p.id),
+        ['old'],
+      )
+      assert.deepEqual(
+        (
+          await reader.listVisiblePhotos({ limit: 10, offset: 0, from: '2021' })
+        ).map((p) => p.id),
+        ['new'],
+      )
       const albums = await reader.listAlbums({ admin: false })
       assert.deepEqual(
         albums.map((a) => a.id),

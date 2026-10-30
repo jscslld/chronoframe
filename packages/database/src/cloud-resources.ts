@@ -113,8 +113,10 @@ export function createCloudResourceRepository(
         throw new RangeError('Invalid pagination')
       return (
         await all<Record<string, unknown>>(
-          `SELECT ${columns} FROM cloud_photos p WHERE p.site_id=? AND ${ready} ${excluded.length ? 'AND p.id NOT IN (SELECT value FROM json_each(?))' : ''} ORDER BY json_extract(p.metadata_json,'$.dateTaken') DESC,p.id LIMIT ? OFFSET ?`,
+          `SELECT ${columns} FROM cloud_photos p WHERE p.site_id=? AND ${ready} ${excluded.length ? 'AND p.id NOT IN (SELECT value FROM json_each(?))' : ''} ${page?.from ? "AND json_extract(p.metadata_json,'$.dateTaken') >= ?" : ''} ${page?.before ? "AND json_extract(p.metadata_json,'$.dateTaken') < ?" : ''} ORDER BY json_extract(p.metadata_json,'$.dateTaken') DESC,p.id LIMIT ? OFFSET ?`,
           ...(excluded.length ? [JSON.stringify(excluded)] : []),
+          ...(page?.from ? [page.from] : []),
+          ...(page?.before ? [page.before] : []),
           page?.limit ?? 1000,
           page?.offset ?? 0,
         )

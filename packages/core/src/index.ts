@@ -13,13 +13,17 @@ export interface PhotoMembership {
   protected: boolean
 }
 
+export interface PhotoPage {
+  limit: number
+  offset: number
+  from?: string
+  before?: string
+}
+
 /** Async boundary allows both embedded SQLite and future asynchronous adapters. */
 export interface ResourceReadRepository {
   protectedPhoto?(photo: Photo): Photo
-  listPhotos(
-    excludedIds?: string[],
-    page?: { limit: number; offset: number },
-  ): Promise<Photo[]>
+  listPhotos(excludedIds?: string[], page?: PhotoPage): Promise<Photo[]>
   listAlbums(): Promise<AlbumReadRecord[]>
   getAlbum(id: number): Promise<AlbumReadRecord | null>
   listAlbumPhotos(id: number): Promise<Photo[]>
@@ -43,18 +47,21 @@ import { ResourceReadError } from './errors.ts'
 /** Read use cases own visibility rules; repositories own query and ordering details. */
 export function createResourceReader(repository: ResourceReadRepository) {
   return {
-    async listPhotos(access: Pick<ReadAccess, 'admin'>): Promise<Photo[]> {
+    async listPhotos(
+      access: Pick<ReadAccess, 'admin'>,
+      page?: PhotoPage,
+    ): Promise<Photo[]> {
       if (!access.admin) throw new ResourceReadError(401, 'Unauthorized')
-      return repository.listPhotos()
+      return repository.listPhotos([], page)
     },
 
-    async listVisiblePhotos(): Promise<Photo[]> {
+    async listVisiblePhotos(page?: PhotoPage): Promise<Photo[]> {
       const excluded = new Set(
         (await repository.listMemberships())
           .filter((m) => m.hidden || m.protected)
           .map((m) => m.photoId),
       )
-      return repository.listPhotos([...excluded])
+      return repository.listPhotos([...excluded], page)
     },
 
     async listAlbums(
@@ -156,3 +163,5 @@ export * from './email-auth.ts'
 
 export type * from './cloud-media.ts'
 export type * from './cloud-execution.ts'
+
+export { parsePhotoPage } from './photo-page.ts'

@@ -65,6 +65,30 @@ test('SQLite reader preserves migrated data, ordering and legacy album visibilit
       (await reader.listVisiblePhotos()).map((photo) => photo.id),
       ['new', 'old'],
     )
+    assert.deepEqual(
+      (await reader.listVisiblePhotos({ limit: 1, offset: 0 })).map(
+        (photo) => photo.id,
+      ),
+      ['new'],
+    )
+    assert.deepEqual(
+      (await reader.listVisiblePhotos({ limit: 1, offset: 1 })).map(
+        (photo) => photo.id,
+      ),
+      ['old'],
+    )
+    assert.deepEqual(
+      (
+        await reader.listVisiblePhotos({ limit: 10, offset: 0, before: '2021' })
+      ).map((photo) => photo.id),
+      ['old'],
+    )
+    assert.deepEqual(
+      (
+        await reader.listVisiblePhotos({ limit: 10, offset: 0, from: '2021' })
+      ).map((photo) => photo.id),
+      ['new'],
+    )
     const listed = await reader.listAlbums(anonymous)
     assert.deepEqual(listed[1]!.photoIds, ['new', 'old'])
     assert.deepEqual(listed[0]!.photoIds, [])
