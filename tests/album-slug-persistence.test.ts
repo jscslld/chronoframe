@@ -249,7 +249,7 @@ test('migration replaces tombstones and retains live slug history', () => {
   rmSync(join(oldMigrations, '0021_reusable_album_slugs.sql'))
   const journalPath = join(oldMigrations, 'meta/_journal.json')
   const journal = JSON.parse(readFileSync(journalPath, 'utf8'))
-  journal.entries.pop()
+  journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx <= 20)
   writeFileSync(journalPath, JSON.stringify(journal))
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
