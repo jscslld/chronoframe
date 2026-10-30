@@ -35,7 +35,7 @@ const syncFromProps = (
       const map: any = mapInstance.value
       map.flyTo?.({
         center: markerCoordinates.value,
-        zoom: Math.max(props.zoom ?? 4, 4),
+        zoom: Math.max(map.getZoom?.() ?? props.zoom ?? 4, 14),
         essential: true,
       })
     }

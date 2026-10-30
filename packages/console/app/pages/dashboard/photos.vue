@@ -3448,6 +3448,19 @@ onUnmounted(() => {
                     </UButton>
                   </div>
 
+                  <ConsoleLocationSearch
+                    :location="locationSelection"
+                    v-if="supportsLocalBatchMetadata"
+                    @select="
+                      (result) => {
+                        locationSelection = {
+                          latitude: result.latitude,
+                          longitude: result.longitude,
+                        }
+                        handleLocationPick()
+                      }
+                    "
+                  />
                   <MapLocationPicker
                     v-model="locationSelection"
                     class="border border-neutral-200 dark:border-neutral-800"
