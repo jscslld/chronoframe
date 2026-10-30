@@ -2220,6 +2220,29 @@ const submitBatchDateUpdate = async () => {
   }
 }
 
+const batchLocationSelection = computed({
+  get: () => {
+    if (
+      String(batchLocationInput.latitude).trim() === '' ||
+      String(batchLocationInput.longitude).trim() === ''
+    )
+      return null
+    const latitude = Number(batchLocationInput.latitude)
+    const longitude = Number(batchLocationInput.longitude)
+    return Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      Math.abs(latitude) <= 90 &&
+      Math.abs(longitude) <= 180 &&
+      (latitude !== 0 || longitude !== 0)
+      ? { latitude, longitude }
+      : null
+  },
+  set: (value: { latitude: number; longitude: number } | null) => {
+    batchLocationInput.latitude = value ? value.latitude.toFixed(6) : ''
+    batchLocationInput.longitude = value ? value.longitude.toFixed(6) : ''
+  },
+})
+
 const openBatchLocationModal = () => {
   const selectedPhotos = getSelectedPhotos()
   if (selectedPhotos.length === 0) {
@@ -2256,17 +2279,8 @@ const submitBatchLocationUpdate = async () => {
     return
   }
 
-  const latitude = Number(batchLocationInput.latitude)
-  const longitude = Number(batchLocationInput.longitude)
-
-  if (
-    Number.isNaN(latitude) ||
-    Number.isNaN(longitude) ||
-    latitude < -90 ||
-    latitude > 90 ||
-    longitude < -180 ||
-    longitude > 180
-  ) {
+  const location = batchLocationSelection.value
+  if (!location) {
     toast.add({
       title: $t('dashboard.photos.messages.invalidGpsCoordinates'),
       description: '',
@@ -2284,10 +2298,7 @@ const submitBatchLocationUpdate = async () => {
       method: 'PUT',
       body: {
         photoIds: selectedPhotos.map((photo) => photo.id),
-        location: {
-          latitude,
-          longitude,
-        },
+        location,
       },
     })
 
@@ -3636,7 +3647,11 @@ onUnmounted(() => {
           </template>
         </UModal>
 
-        <UModal v-model:open="isBatchLocationModalOpen">
+        <UModal
+          v-model:open="isBatchLocationModalOpen"
+          :dismissible="!isBatchUpdatingLocation"
+          :ui="{ content: 'sm:max-w-2xl max-h-[90dvh] overflow-y-auto' }"
+        >
           <template #content>
             <div class="p-6 space-y-4">
               <div class="space-y-1">
@@ -3651,6 +3666,28 @@ onUnmounted(() => {
                   }}
                 </p>
               </div>
+
+              <fieldset
+                :disabled="isBatchUpdatingLocation"
+                class="space-y-3"
+              >
+                <ConsoleLocationSearch
+                  v-if="supportsLocalBatchMetadata"
+                  :location="batchLocationSelection"
+                  @select="
+                    (result) => {
+                      batchLocationSelection = {
+                        latitude: result.latitude,
+                        longitude: result.longitude,
+                      }
+                    }
+                  "
+                />
+                <MapLocationPicker
+                  v-model="batchLocationSelection"
+                  class="border border-neutral-200 dark:border-neutral-800"
+                />
+              </fieldset>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <UFormField

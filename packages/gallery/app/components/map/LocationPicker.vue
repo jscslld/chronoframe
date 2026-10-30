@@ -20,6 +20,7 @@ const emit = defineEmits<{
   pick: [{ latitude: number; longitude: number }]
 }>()
 
+const mapId = `photo-location-picker-${useId()}`
 const mapInstance = ref<MapInstance | null>(null)
 const markerCoordinates = ref<[number, number] | null>(null)
 const { locale } = useI18n()
@@ -114,7 +115,7 @@ onBeforeUnmount(() => {
   >
     <MapProvider
       class="w-full h-full"
-      :map-id="'photo-location-picker'"
+      :map-id="mapId"
       :center="markerCoordinates ?? undefined"
       :zoom="
         markerCoordinates ? Math.max($props.zoom ?? 4, 4) : ($props.zoom ?? 2)
